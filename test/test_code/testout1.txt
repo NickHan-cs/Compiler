@@ -1,0 +1,10 @@
+18375362
+25
+quotient is 2
+Please choose 1 or 2:
+3
+0
+4
+()
+[]
+{}

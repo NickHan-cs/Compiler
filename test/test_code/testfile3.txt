@@ -1,0 +1,40 @@
+const char h_i = '*';
+const char j3k = '/';
+int wx;
+char yz[3][2] = {{'+', '-'}, {'*', '/'}, {'_', '0'}};
+int OP() {
+    const char QS = '1', RT = '2';
+    int plus;
+    plus = QS + RT;
+    return (plus - yz[2][1]);
+}
+int try_2(int year) {
+    printf((-(year - 2000)));
+    return (year - 2000);
+}
+void try(int year) {
+    int _2;
+    _2 = try_2(year);
+    printf(year / _2);
+}
+void main() {
+    wx = 2018;
+    printf("18375362");
+    printf("wx = ", wx);
+    if (wx != 2019) {
+    	printf("Yes!");
+    }
+    if (OP() == 51) {
+    	wx = wx + (3 - 1);
+    }
+    printf("wx = ", wx);
+    if (WX == 2020) {
+    	printf("Yes!");
+    }
+    yz[1][1] = h_i;
+    yz[1][0] = j3k;
+    printf("yz[1][1] is ", yz[1][1]);
+    printf("yz[1][0] is ", yz[1][0]);
+    try(wx);
+    printf("Finished!");
+}

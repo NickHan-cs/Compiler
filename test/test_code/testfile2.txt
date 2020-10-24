@@ -1,0 +1,36 @@
+const int b3 = -20, c_4 = +016;
+const char d78 = '+', ef999 = '-';
+char qt;
+int rs, uv[60][80];
+void main() {
+    int n, i;
+    int j;
+    int c_3;
+    int k = 100;
+    char ch = '1';
+    printf("18375362");
+    scanf(n);
+    if (n == 0) {
+    	ch = '1';
+    } else {
+    	ch = '2';
+    }
+    printf('n');
+    printf(ch);
+    printf("=");
+    printf(0);
+    for (i = 0; i <= 16; i = i + 4) {
+    	k = k + b3;
+    }
+    printf("k = ", k);
+    for (j = 1; j >= 0; j = j - 1) ;
+    while (k <= 5) {
+    	k = k + 2;
+    }
+    printf(k);
+    c_3 = (c_4 / 4) + 2;
+    printf("c_3 == ", c_3);
+    qt = d78;
+    printf(qt);
+    printf("rs = ", ef999 - '-');
+}

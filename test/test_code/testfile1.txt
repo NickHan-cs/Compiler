@@ -1,0 +1,32 @@
+const int a = 5;
+void GH() {}
+void IJ(int KL, char MN) {}
+void main() {
+    int b;
+    int n, m;
+    int i = 2;
+    char ans = '*';
+    printf("18375362");
+    b = 2;
+    printf(-a * a * (-b + 1));
+    printf("quotient is ", a / b);
+    printf("Please choose 1 or 2:");
+    scanf(n);
+    switch (n) {
+        case 1: ans = 'N';
+        case 2: ans = 'N';
+        default: ans = '3';
+    }
+    printf(ans);
+    IJ(b + n, ans);
+    GH();
+    scanf(m);
+    printf(m);
+    for (i = 1; i <= 2; i = i + 1) {
+    	m = m + 2;
+    }
+    printf(m);
+    printf("()");
+    printf("[]");
+    printf("{}");
+}
