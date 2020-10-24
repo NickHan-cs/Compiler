@@ -1,10 +1,15 @@
 #pragma once
+#include <stack>
+#include <iostream>
+#include <cctype>
+#include <string>
 #include <vector>
+#include <utility>
+#include <cstdlib>
+#include <algorithm>
 #include <unordered_map>
-# include "input_file.h"
-
-const bool LEXER_OUTPUT = false;
-
+#include "InputFile.h"
+using namespace std;
 // 类别码编号
 constexpr auto IDENFR = 0;		// 标识符
 constexpr auto INTCON = 1;		// 整型常量
@@ -47,7 +52,7 @@ constexpr auto LBRACE = 37;		// {
 constexpr auto RBRACE = 38;		// }
 
 // 类别码表
-const std::vector<std::string> symbol_table = {
+vector<string> symbol_table = {
 	"IDENFR",
 	"INTCON",
 	"CHARCON",
@@ -89,8 +94,7 @@ const std::vector<std::string> symbol_table = {
 	"RBRACE"
 };
 
-// 保留字表
-const std::unordered_map<std::string, int> reserver_map{
+unordered_map<string, int> reserver_map{
 	{"const",	CONSTTK},
 	{"int",		INTTK},
 	{"char",	CHARTK},
@@ -112,19 +116,223 @@ class Token {
 private:
 	int line;
 	int token_sym;
-	std::string token_str;
+	string token_str;
 public:
-	Token(int, int, std::string);
+	Token(int, int, string);
 	~Token(void);
 	int get_line(void) { return line; }
 	int get_token_sym(void) { return token_sym; }
-	std::string get_token_str(void) { return token_str; }
+	string get_token_str(void) { return token_str; }
 };
 
-namespace lexer {
-	// 如果token_str是保留字，GetReserverNum返回其类别码编号；否则，返回0
-	int GetReserverNum(std::string token_str);
-	bool IsChar(char ch);
-	bool IsCharOfString(char ch);
-	Token GetNewToken();
+Token::Token(int line, int token_sym, string token_str) {
+	this->line = line;
+	this->token_sym = token_sym;
+	this->token_str = token_str;
+}
+
+Token::~Token(void) {
+}
+
+extern InputFile input_file;
+extern const bool LEXER_OUTPUT;
+extern stack<Token> token_stack;
+extern ofstream outfile;
+
+namespace Lexer {
+	int getSymbol(string token_str) {
+		transform(token_str.begin(), token_str.end(), token_str.begin(), ::tolower);
+		if (reserver_map.find(token_str) != reserver_map.end()) {
+			return reserver_map.at(token_str);
+		}
+		return 0;
+	}
+
+	bool isChar(char ch) {
+		return isalpha(ch) || isdigit(ch) || ch == '+' || ch == '-' || ch == '*' || ch == '/' || ch == '_';
+	}
+
+	bool isCharOfString(char ch) {
+		int asc = ch;
+		return asc >= 32 && asc <= 126 && asc != 34;
+	}
+
+	Token get_new_sym() {
+		pair<char, int> ch_pair = input_file.getch();
+		if (ch_pair.second == 0) {
+			Token token(0, -1, "");
+			return token;
+		}
+		while (isspace(ch_pair.first)) {
+			ch_pair = input_file.getch();
+		}	// 跳过空白符
+		char ch = ch_pair.first;
+		int line = ch_pair.second;
+		string token_str = "";
+		int token_sym = -1;
+		if (isalpha(ch) || ch == '_') {	// 判断当前字符是否是一个字母
+			while (isalpha(ch) || ch == '_' || isdigit(ch)) {	// 将字符拼接成字符串
+				token_str += ch;
+				ch = input_file.getch().first;
+			}
+			input_file.retract();	// 指针后退一个字符
+			token_sym = Lexer::getSymbol(token_str);	// 判断是否保留字，否则为标识符
+		}
+		else if (isdigit(ch)) {	//	判断当前字符是否是一个数字
+			while (isdigit(ch)) {	// 将字符拼接成整数
+				token_str += ch;
+				ch = input_file.getch().first;
+			}
+			input_file.retract();
+			// int num = atoi(token_str.c_str());	// 将token中的字符串转换成整数
+			token_sym = INTCON;	// 此时识别的单词是整数常量
+		}
+		else if (ch == '\'') {	// 判断当前字符是否是单引号
+			ch = input_file.getch().first;
+			if (Lexer::isChar(ch)) {
+				token_str += ch;
+				ch = input_file.getch().first;
+				if (ch == '\'') {
+					token_sym = CHARCON;
+				}
+				else {
+					input_file.retract();
+				}
+			}
+			else {
+				input_file.retract();
+			}
+		}
+		else if (ch == '\"') {
+			ch = input_file.getch().first;
+			if (Lexer::isCharOfString(ch)) {
+				while (Lexer::isCharOfString(ch)) {
+					token_str += ch;
+					ch = input_file.getch().first;
+				}
+				if (ch == '\"') {
+					token_sym = STRCON;
+				}
+				else {
+					input_file.retract();
+				}
+			}
+			else {
+				input_file.retract();
+			}
+		}
+		else if (ch == '+') {
+			token_str += ch;
+			token_sym = PLUS;
+		}
+		else if (ch == '-') {
+			token_str += ch;
+			token_sym = MINU;
+		}
+		else if (ch == '*') {
+			token_str += ch;
+			token_sym = MULT;
+		}
+		else if (ch == '/') {
+			token_str += ch;
+			token_sym = DIV;
+		}
+		else if (ch == '<') {
+			token_str += ch;
+			ch = input_file.getch().first;
+			if (ch == '=') {
+				token_str += ch;
+				token_sym = LEQ;
+			}
+			else {
+				input_file.retract();
+				token_sym = LSS;
+			}
+		}
+		else if (ch == '>') {
+			token_str += ch;
+			ch = input_file.getch().first;
+			if (ch == '=') {
+				token_str += ch;
+				token_sym = GEQ;
+			}
+			else {
+				input_file.retract();
+				token_sym = GRE;
+			}
+		}
+		else if (ch == '=') {
+			token_str += ch;
+			ch = input_file.getch().first;
+			if (ch == '=') {
+				token_str += ch;
+				token_sym = EQL;
+			}
+			else {
+				input_file.retract();
+				token_sym = ASSIGN;
+			}
+		}
+		else if (ch == '!') {
+			token_str += ch;
+			ch = input_file.getch().first;
+			if (ch == '=') {
+				token_str += ch;
+				token_sym = NEQ;
+			}
+			else {
+				input_file.retract();
+			}
+		}
+		else if (ch == ':') {
+			token_str += ch;
+			token_sym = COLON;
+		}
+		else if (ch == ';') {
+			token_str += ch;
+			token_sym = SEMICN;
+		}
+		else if (ch == ',') {
+			token_str += ch;
+			token_sym = COMMA;
+		}
+		else if (ch == '(') {
+			token_str += ch;
+			token_sym = LPARENT;
+		}
+		else if (ch == ')') {
+			token_str += ch;
+			token_sym = RPARENT;
+		}
+		else if (ch == '[') {
+			token_str += ch;
+			token_sym = LBRACK;
+		}
+		else if (ch == ']') {
+			token_str += ch;
+			token_sym = RBRACK;
+		}
+		else if (ch == '{') {
+			token_str += ch;
+			token_sym = LBRACE;
+		}
+		else if (ch == '}') {
+			token_str += ch;
+			token_sym = RBRACE;
+		}
+		if (token_sym >= 0 && LEXER_OUTPUT) {
+			outfile << symbol_table[token_sym] << " " << token_str << endl;
+		}
+		Token token(line, token_sym, token_str);
+		return token;
+	}
+
+	Token getsym() {
+		if (!token_stack.empty()) {
+			Token token = token_stack.top();
+			token_stack.pop();
+			return token;
+		}
+		return Lexer::get_new_sym();
+	}
 }
