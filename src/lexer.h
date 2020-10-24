@@ -1,9 +1,10 @@
 #pragma once
+#include <cctype>
+#include <string>
 #include <vector>
 #include <unordered_map>
-# include "input_file.h"
-
-const bool LEXER_OUTPUT = false;
+#include <algorithm>
+using namespace std;
 
 // 类别码编号
 constexpr auto IDENFR = 0;		// 标识符
@@ -16,7 +17,7 @@ constexpr auto CHARTK = 6;		// char
 constexpr auto VOIDTK = 7;		// void
 constexpr auto MAINTK = 8;		// main
 constexpr auto IFTK = 9;		// if
-constexpr auto ELSETK = 10;		// else
+constexpr auto ELSETK = 10;		//else
 constexpr auto SWITCHTK = 11;	// switch
 constexpr auto CASETK = 12;		// case
 constexpr auto DEFAULTTK = 13;	// default
@@ -47,7 +48,7 @@ constexpr auto LBRACE = 37;		// {
 constexpr auto RBRACE = 38;		// }
 
 // 类别码表
-const std::vector<std::string> symbol_table = {
+vector<string> symbol_table = {
 	"IDENFR",
 	"INTCON",
 	"CHARCON",
@@ -89,8 +90,7 @@ const std::vector<std::string> symbol_table = {
 	"RBRACE"
 };
 
-// 保留字表
-const std::unordered_map<std::string, int> reserver_map{
+unordered_map<string, int> reserver_map{
 	{"const",	CONSTTK},
 	{"int",		INTTK},
 	{"char",	CHARTK},
@@ -108,23 +108,21 @@ const std::unordered_map<std::string, int> reserver_map{
 	{"return",	RETURNTK}
 };
 
-class Token {
-private:
-	int line;
-	int token_sym;
-	std::string token_str;
-public:
-	Token(int, int, std::string);
-	~Token(void);
-	int get_line(void) { return line; }
-	int get_token_sym(void) { return token_sym; }
-	std::string get_token_str(void) { return token_str; }
-};
+namespace Lexer {
+	int getSymbol(string token_str) {
+		transform(token_str.begin(), token_str.end(), token_str.begin(), ::tolower);
+		if (reserver_map.find(token_str) != reserver_map.end()) {
+			return reserver_map.at(token_str);
+		}
+		return 0;
+	}
 
-namespace lexer {
-	// 如果token_str是保留字，GetReserverNum返回其类别码编号；否则，返回0
-	int GetReserverNum(std::string token_str);
-	bool IsChar(char ch);
-	bool IsCharOfString(char ch);
-	Token GetNewToken();
+	bool isChar(char ch) {
+		return isalpha(ch) or isdigit(ch) or ch == '+' or ch == '-' or ch == '*' or ch == '/' or ch == '_';
+	}
+
+	bool isCharOfString(char ch) {
+		int asc = ch;
+		return asc >= 32 && asc <= 126 && asc != 34;
+	}
 }
