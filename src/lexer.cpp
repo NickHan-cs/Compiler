@@ -8,6 +8,7 @@
 #include <utility>
 #include <cstdlib>
 #include "lexer.h"
+#include "error.h"
 
 using namespace std;
 
@@ -68,7 +69,6 @@ Token lexer::GetNewToken() {
 			ch = input_file.getch().first;
 		}
 		input_file.Retract();
-		// int num = atoi(token_str.c_str());	// 将token中的字符串转换成整数
 		token_sym = INTCON;	// 此时识别的单词是整数常量
 	}
 	else if (ch == '\'') {	// 判断当前字符是否是单引号
@@ -76,34 +76,46 @@ Token lexer::GetNewToken() {
 		if (lexer::IsChar(ch)) {
 			token_str += ch;
 			ch = input_file.getch().first;
-			if (ch == '\'') {
-				token_sym = CHARCON;
-			}
-			else {
-				input_file.Retract();
+			if (ch != '\'') {
+				// 非法符号或不符合词法
+				error::OutputError(line, InvalidSymbol);
+				while (ch != '\'') {
+					ch = input_file.getch().first;
+				}
 			}
 		}
 		else {
-			input_file.Retract();
+			// 非法符号或不符合词法
+			error::OutputError(line, InvalidSymbol);
+			// 如果没有'会死循环
+			while (ch != '\'') {
+				ch = input_file.getch().first;
+			}
 		}
+		token_sym = CHARCON;
 	}
 	else if (ch == '\"') {
 		ch = input_file.getch().first;
-		if (lexer::IsCharOfString(ch)) {
-			while (lexer::IsCharOfString(ch)) {
-				token_str += ch;
-				ch = input_file.getch().first;
-			}
-			if (ch == '\"') {
-				token_sym = STRCON;
-			}
-			else {
-				input_file.Retract();
-			}
+		if (ch == '\"') {
+			// 符号串中无任何符号
+			// 因为不会出现恶意换行的情况，所以错误所在行就是前双引号所在行
+			error::OutputError(line, InvalidSymbol);
 		}
 		else {
-			input_file.Retract();
+			while (ch != '\"') {
+				// 如果没有后双引号，就会死循环
+				if (lexer::IsCharOfString(ch)) {
+					// 非法字符不加入字符串中
+					token_str += ch;
+				}
+				else {
+					// 因为不会出现恶意换行的情况，所以字符串一定在同一行，错误所在行即前双引号所在行
+					error::OutputError(line, InvalidSymbol);
+				}
+				ch = input_file.getch().first;
+			}
 		}
+		token_sym = STRCON;
 	}
 	else if (ch == '+') {
 		token_str += ch;
@@ -204,8 +216,11 @@ Token lexer::GetNewToken() {
 		token_str += ch;
 		token_sym = RBRACE;
 	}
+	else {
+		// 根据题目要求，似乎不会出现这种情况
+	}
 	if (token_sym >= 0 && LEXER_OUTPUT) {
-		output_file << symbol_table[token_sym] << " " << token_str << endl;
+		output_file << token_table[token_sym] << " " << token_str << endl;
 	}
 	Token token(line, token_sym, token_str);
 	return token;

@@ -1,23 +1,37 @@
 #include <iostream>
 #include <stack>
-#include <string>
 #include <unordered_set>
+#include <cassert>
 #include "lexer.h"
-#include "input_file.h"
 #include "grammar.h"
+#include "symbol.h"
 #include "error.h"
 using namespace std;
 
-extern InputFile input_file;
 extern ofstream output_file;
+extern Token last_token;
 extern Token token;
 
 stack<Token> token_stack;
 stack<Token> temp_token_stack;
-unordered_set<string> func_with_ret_set;
-unordered_set<string> func_no_ret_set;
+
+static int subprogram_level = -1;	// 分程序层次
+stack<int> subprogram_level_stack;	// 分程序层次栈
+
+enum ReturnState {
+	InNoRetFunc,				// 在无返回值函数定义
+	InIntRetFuncNoReturn,		// 在返回整型的函数定义中且无return
+	InCharRetFuncNoReturn,		// 在返回字符型的函数定义且无return
+	InIntRetFuncWithReturn,		// 在返回整型的函数定义中且已有return
+	InCharRetFuncWithReturn,	// 在返回字符型的函数定义中且已有return
+	NotInFunc					// 不在函数定义
+};
+
+ReturnState return_state = NotInFunc;
 
 Token grammar::GetToken() {
+	// 保存前一个token，这里的token是全局变量
+	last_token = token;
 	if (!token_stack.empty()) {
 		Token token = token_stack.top();
 		token_stack.pop();
@@ -28,7 +42,13 @@ Token grammar::GetToken() {
 
 void grammar::OutputToken(Token token) {
 	if (GRAMMAR_OUTPUT) {
-		output_file << symbol_table[token.get_token_sym()] << " " << token.get_token_str() << endl;
+		output_file << token_table[token.get_token_sym()] << " " << token.get_token_str() << endl;
+	}
+}
+
+void grammar::OutputGrammarElementName(string grammar_element_name) {
+	if (GRAMMAR_OUTPUT) {
+		output_file << grammar_element_name << endl;
 	}
 }
 
@@ -39,18 +59,72 @@ void grammar::MoveStack() {
 	}
 }
 
+void grammar::ExpectedOrError(int token_sym) {
+	if (token.get_token_sym() == token_sym) {
+		grammar::OutputToken(token);
+		token = grammar::GetToken();
+		return;
+	}
+	if (token_sym == SEMICN) {
+		// 应为分号;
+		assert(last_token.get_line() <= token.get_line());
+		error::OutputError(last_token.get_line(), SemicnMiss);
+	}
+	else if (token_sym == RPARENT) {
+		// 应为右小括号')'
+		error::OutputError(token.get_line(), RparentMiss);
+	}
+	else if (token_sym == RBRACK) {
+		// 应为右中括号']'
+		error::OutputError(token.get_line(), RbrackMiss);
+	}
+	else if (token_sym == CHARCON || token_sym == CONSTTK || token_sym == VOIDTK || token_sym == MAINTK || 
+		token_sym == IFTK || token_sym == SWITCHTK || token_sym == CASETK || token_sym == DEFAULTTK || token_sym == SCANFTK || 
+		token_sym == PRINTFTK || token_sym == RETURNTK || token_sym == COLON || token_sym == ASSIGN || token_sym == LPARENT || 
+		token_sym == LBRACK || token_sym == LBRACE || token_sym == RBRACE) {
+		/*
+		token_sym == CHARCON 应为字符常量
+		token_sym == VOIDTK 应为void
+		token_sym == MAINTK 应为main
+		token_sym == IFTK 应为if
+		token_sym == SWITCHTK 应为switch
+		token_sym == SCANFTK 应为scanf
+		token_sym == PRINTFTK 应为printf
+		token_sym == COLON 应为:
+		token_sym == ASSIGN 应为=
+		token_sym == LPARENT 应为'('
+		token_sym == LBRACK 应为'['
+		token_sym == LBRACE	应为'{'
+		token_sym == RBRACE	应为'}'
+		*/
+		// error::OutputError(token.get_line(), OtherError);
+	}
+}
+
+void grammar::GetIntoNewLevel() {
+	subprogram_level += 1;	// 分程序的层次加1
+	subprogram_level_stack.push(subprogram_level);
+}
+
+void grammar::ExitCurLevel() {
+	// 需要弹出subprogram_level_stack的第一项，并将该level的所有标识符从symbol_table中清空
+	int cur_level = subprogram_level_stack.top();
+	subprogram_level_stack.pop();
+	symbol_table::DelCurLevelSymbol(cur_level);
+}
+
 bool grammar::is_func_def() {
 	if (token.get_token_sym() != INTTK && token.get_token_sym() != CHARTK &&
 		token.get_token_sym() != VOIDTK) {
 		return false;
 	}
-	/*
-	Token temp_token = grammar::GetToken();
-	token_stack.push(temp_token);
-	return temp_token.get_token_sym() == IDENFR;
-	*/
 	temp_token_stack.push(grammar::GetToken());
 	if (temp_token_stack.top().get_token_sym() != IDENFR) {
+		grammar::MoveStack();
+		return false;
+	}
+	temp_token_stack.push(grammar::GetToken());
+	if (temp_token_stack.top().get_token_sym() != LPARENT) {
 		grammar::MoveStack();
 		return false;
 	}
@@ -67,75 +141,9 @@ bool grammar::is_var_declaration() {
 		grammar::MoveStack();
 		return false;
 	}
-	/*
-	Token temp_token = grammar::GetToken();
-	temp_token_stack.push(temp_token);
-	grammar::MoveStack();
-	return temp_token.get_token_sym() == LBRACK || temp_token.get_token_sym() == ASSIGN ||
-		temp_token.get_token_sym() == COMMA || temp_token.get_token_sym() == SEMICN;
-	*/
 	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() != LBRACK && temp_token_stack.top().get_token_sym() != ASSIGN &&
-		temp_token_stack.top().get_token_sym() != COMMA && temp_token_stack.top().get_token_sym() != SEMICN) {
-		grammar::MoveStack();
-		return false;
-	}
-	grammar::MoveStack();
-	return true;
-}
-
-bool grammar::is_var_def_no_init() {
-	if (token.get_token_sym() != INTTK && token.get_token_sym() != CHARTK) {
-		return false;
-	}
-	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() != IDENFR) {
-		grammar::MoveStack();
-		return false;
-	}
-	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() == COMMA ||
-		temp_token_stack.top().get_token_sym() == SEMICN) {
-		grammar::MoveStack();
-		return true;
-	}
-	if (temp_token_stack.top().get_token_sym() != LBRACK) {
-		grammar::MoveStack();
-		return false;
-	}
-	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() != INTCON) {
-		grammar::MoveStack();
-		return false;
-	}
-	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() != RBRACK) {
-		grammar::MoveStack();
-		return false;
-	}
-	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() == COMMA ||
-		temp_token_stack.top().get_token_sym() == SEMICN) {
-		grammar::MoveStack();
-		return true;
-	}
-	if (temp_token_stack.top().get_token_sym() != LBRACK) {
-		grammar::MoveStack();
-		return false;
-	}
-	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() != INTCON) {
-		grammar::MoveStack();
-		return false;
-	}
-	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() != RBRACK) {
-		grammar::MoveStack();
-		return false;
-	}
-	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() != COMMA &&
-		temp_token_stack.top().get_token_sym() != SEMICN) {
+	if (temp_token_stack.top().get_token_sym() == LPARENT) {
+		// 不是函数定义，就默认为变量声明
 		grammar::MoveStack();
 		return false;
 	}
@@ -144,69 +152,22 @@ bool grammar::is_var_def_no_init() {
 }
 
 bool grammar::is_var_def_with_init() {
-	if (token.get_token_sym() != INTTK && token.get_token_sym() != CHARTK) {
-		return false;
-	}
 	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() != IDENFR) {
-		grammar::MoveStack();
-		return false;
-	}
-	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() == ASSIGN) {
-		grammar::MoveStack();
-		return true;
-	}
-	if (temp_token_stack.top().get_token_sym() != LBRACK) {
-		grammar::MoveStack();
-		return false;
-	}
-	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() != INTCON) {
-		grammar::MoveStack();
-		return false;
-	}
-	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() != RBRACK) {
-		grammar::MoveStack();
-		return false;
-	}
-	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() == ASSIGN) {
-		grammar::MoveStack();
-		return true;
-	}
-	if (temp_token_stack.top().get_token_sym() != LBRACK) {
-		grammar::MoveStack();
-		return false;
-	}
-	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() != INTCON) {
-		grammar::MoveStack();
-		return false;
-	}
-	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() != RBRACK) {
-		grammar::MoveStack();
-		return false;
-	}
-	temp_token_stack.push(grammar::GetToken());
-	if (temp_token_stack.top().get_token_sym() != ASSIGN) {
-		grammar::MoveStack();
-		return false;
+	while (temp_token_stack.top().get_token_sym() != INTTK && temp_token_stack.top().get_token_sym() != CHARTK &&
+		temp_token_stack.top().get_token_sym() != VOIDTK && temp_token_stack.top().get_token_sym() != COMMA &&
+		temp_token_stack.top().get_token_sym() != SEMICN) {
+		if (temp_token_stack.top().get_token_sym() == ASSIGN) {
+			grammar::MoveStack();
+			return true;
+		}
+		temp_token_stack.push(grammar::GetToken());
 	}
 	grammar::MoveStack();
-	return true;
+	return false;
 }
 
 bool grammar::is_statement() {
 	if (token.get_token_sym() == IDENFR) {
-		/*
-		Token temp_token = grammar::GetToken();
-		token_stack.push(temp_token);
-		return temp_token.get_token_sym() == LPARENT || temp_token.get_token_sym() == ASSIGN ||
-			temp_token.get_token_sym() == LBRACK;
-		*/
 		temp_token_stack.push(grammar::GetToken());
 		if (temp_token_stack.top().get_token_sym() != LPARENT && temp_token_stack.top().get_token_sym() != ASSIGN &&
 			temp_token_stack.top().get_token_sym() != LBRACK) {
@@ -224,14 +185,24 @@ bool grammar::is_statement() {
 		token.get_token_sym() == SEMICN || token.get_token_sym() == RETURNTK || token.get_token_sym() == LBRACE;
 }
 
-bool grammar::is_func_call_with_ret() {
-	return token.get_token_sym() == IDENFR &&
-		func_with_ret_set.find(token.get_token_str()) != func_with_ret_set.end();
+bool grammar::is_func_call() {
+	if (token.get_token_sym() != IDENFR) {
+		return false;
+	}
+	temp_token_stack.push(grammar::GetToken());
+	if (temp_token_stack.top().get_token_sym() != LPARENT) {
+		grammar::MoveStack();
+		return false;
+	}
+	grammar::MoveStack();
+	return true;
 }
 
-bool grammar::is_func_call_no_ret() {
-	return token.get_token_sym() == IDENFR &&
-		func_no_ret_set.find(token.get_token_str()) != func_no_ret_set.end();
+bool grammar::is_func_call_with_ret() {
+	if (!grammar::is_func_call()) {
+		return false;
+	}
+	return symbol_table::IsWithRetFunc(token.get_token_str());
 }
 
 bool grammar::is_expr() {
@@ -242,6 +213,7 @@ bool grammar::is_expr() {
 
 // <程序>::= [<常量说明>][<变量说明>]{<有返回值函数定义>|<无返回值函数定义>}<主函数>
 void grammar::program() {
+	grammar::GetIntoNewLevel();
 	if (token.get_token_sym() == CONSTTK) {
 		grammar::const_declaration();
 	}
@@ -257,257 +229,177 @@ void grammar::program() {
 		}
 	}
 	grammar::main_func();
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<程序>" << endl;
-	}
+	grammar::ExitCurLevel();
+	grammar::OutputGrammarElementName("<程序>");
 }
 
 // <有返回值函数定义>::=<声明头部>'('<参数表>')''{'<复合语句>'}'
 void grammar::func_def_with_ret() {
 	grammar::declaration_head();	// 得到函数名
-	if (token.get_token_sym() != LPARENT) {
-		// error();
-	}
-	else {
-		grammar::OutputToken(token);
-		token = grammar::GetToken();
-		grammar::para_tlb();
-		if (token.get_token_sym() != RPARENT) {
-			// error();
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-			if (token.get_token_sym() != LBRACE) {
-				// error();
-			}
-			else {
-				grammar::OutputToken(token);
-				token = grammar::GetToken();
-				grammar::compound_statements();
-				if (token.get_token_sym() != RBRACE) {
-					// error();
-				}
-				else {
-					grammar::OutputToken(token);
-					token = grammar::GetToken();
-				}
-			}
-		}
 
+	grammar::GetIntoNewLevel();
+	ExpectedOrError(LPARENT);
+	grammar::para_tlb();
+	ExpectedOrError(RPARENT);
+	ExpectedOrError(LBRACE);
+	grammar::compound_statements();
+	if (return_state == InIntRetFuncNoReturn || return_state == InCharRetFuncNoReturn) {
+		error::OutputError(token.get_line(), RetFuncMissReturn);
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<有返回值函数定义>" << endl;
-	}
+	ExpectedOrError(RBRACE);
+	grammar::ExitCurLevel();
+
+	return_state = NotInFunc;
+	grammar::OutputGrammarElementName("<有返回值函数定义>");
 }
 
 // <声明头部>::=int<标识符> | char<标识符>
 void grammar::declaration_head() {
+	// 如果声明头部中没有声明函数返回值类型，默认该函数为无返回值函数
+	SymbolType func_ret_type = VoidFuncSym;
 	if (token.get_token_sym() != INTTK && token.get_token_sym() != CHARTK) {
+		// 声明头部中没有声明返回值类型 或 返回值类型不是int或char
 		// error();
 	}
 	else {
+		if (token.get_token_sym() == INTTK) {
+			func_ret_type = IntFuncSym;
+			return_state = InIntRetFuncNoReturn;
+		}
+		else if (token.get_token_sym() == CHARTK) {
+			func_ret_type = CharFuncSym;
+			return_state = InCharRetFuncNoReturn;
+		}
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
-		if (token.get_token_sym() != IDENFR) {
-			// error();
-		}
-		else {
-			grammar::OutputToken(token);
-			if (token.get_token_str() != "") {
-				func_with_ret_set.emplace(token.get_token_str());
-			}
-			token = grammar::GetToken();
-		}
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<声明头部>" << endl;
+
+	if (token.get_token_sym() != IDENFR) {
+		// 声明头部中没有指定函数名
+		// error();
 	}
+	else {
+		if (!symbol_table::AddFuncSymbol(token.get_token_str(), func_ret_type, subprogram_level_stack.top())) {
+			error::OutputError(token.get_line(), NameRedefine);
+		}
+		grammar::OutputToken(token);
+		token = grammar::GetToken();
+	}
+	grammar::OutputGrammarElementName("<声明头部>");
 }
 
 // <无返回值函数定义>::=void<标识符>'('<参数表>')''{'<复合语句>'}'
 void grammar::func_def_no_ret() {
-	if (token.get_token_sym() != VOIDTK) {
+	return_state = InNoRetFunc;
+	ExpectedOrError(VOIDTK);
+	if (token.get_token_sym() != IDENFR) {
+		// 无返回值函数声明时没有声明函数名
 		// error();
-		if (GRAMMAR_OUTPUT_DEBUG) {
-			output_file << "func_def_no_ret got " << token.get_token_str() << " not VOIDTK" << endl;
-		}
 	}
 	else {
+		if (!symbol_table::AddFuncSymbol(token.get_token_str(), VoidFuncSym, subprogram_level_stack.top())) {
+			error::OutputError(token.get_line(), NameRedefine);
+		}
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
-		if (token.get_token_sym() != IDENFR) {
-			// error();
-			if (GRAMMAR_OUTPUT_DEBUG) {
-				output_file << "func_def_no_ret got " << token.get_token_str() << " not IDENFR" << endl;
-			}
-		}
-		else {
-			grammar::OutputToken(token);
-			if (token.get_token_str() != "") {
-				func_no_ret_set.emplace(token.get_token_str());
-			}
-			token = grammar::GetToken();
-			if (token.get_token_sym() != LPARENT) {
-				// error();
-				if (GRAMMAR_OUTPUT_DEBUG) {
-					output_file << "func_def_no_ret got " << token.get_token_str() << " not LPARENT" << endl;
-				}
-			}
-			else {
-				grammar::OutputToken(token);
-				token = grammar::GetToken();
-				grammar::para_tlb();
-				if (token.get_token_sym() != RPARENT) {
-					// error();
-					if (GRAMMAR_OUTPUT_DEBUG) {
-						output_file << "func_def_no_ret got " << token.get_token_str() << " not RPARENT" << endl;
-					}
-				}
-				else {
-					grammar::OutputToken(token);
-					token = grammar::GetToken();
-					if (token.get_token_sym() != LBRACE) {
-						// error();
-						if (GRAMMAR_OUTPUT_DEBUG) {
-							output_file << "func_def_no_ret got " << token.get_token_str() << " not LBRACE" << endl;
-						}
-					}
-					else {
-						grammar::OutputToken(token);
-						token = grammar::GetToken();
-						grammar::compound_statements();
-						if (token.get_token_sym() != RBRACE) {
-							// error();
-							if (GRAMMAR_OUTPUT_DEBUG) {
-								output_file << "func_def_no_ret got " << token.get_token_str() << " not RBRACE" << endl;
-							}
-						}
-						else {
-							grammar::OutputToken(token);
-							token = grammar::GetToken();
-						}
-					}
-				}
-			}
-		}
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<无返回值函数定义>" << endl;
-	}
+	grammar::GetIntoNewLevel();
+	ExpectedOrError(LPARENT);
+	grammar::para_tlb();
+	ExpectedOrError(RPARENT);
+	ExpectedOrError(LBRACE);
+	grammar::compound_statements();
+	ExpectedOrError(RBRACE);
+	grammar::ExitCurLevel();
+
+	return_state = NotInFunc;
+	grammar::OutputGrammarElementName("<无返回值函数定义>");
 }
 
 // <参数表>::=<类型标识符><标识符>{,<类型标识符><标识符>}|<空>
 void grammar::para_tlb() {
+	shared_ptr<Symbol> symbol_ptr = symbol_table::GetSymbolPtrVectorBack();
+	shared_ptr<FuncSymbol> func_symbol_ptr = NULL;
+	if (symbol_table::IsFuncSymbol(symbol_ptr->get_symbol_type())) {
+		func_symbol_ptr = dynamic_pointer_cast<FuncSymbol>(symbol_ptr);
+	}
+
 	if (token.get_token_sym() == INTTK || token.get_token_sym() == CHARTK) {
+		SymbolType var_symbol_type = IntVarSym;
+		if (token.get_token_sym() == CHARTK) {
+			var_symbol_type = CharVarSym;
+		}
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		if (token.get_token_sym() != IDENFR) {
+			// 参数表中int 或 char后没有标识符
 			// error();
-			if (GRAMMAR_OUTPUT_DEBUG) {
-				output_file << "para_tlb got " << token.get_token_str() << " not IDENFR" << endl;
-			}
 		}
 		else {
+			if (!symbol_table::AddVarSymbol(token.get_token_str(), var_symbol_type, subprogram_level_stack.top())) {
+				error::OutputError(token.get_line(), NameRedefine);
+			} 
+			else if (func_symbol_ptr) {
+				shared_ptr<Symbol> arg_symbol_ptr = symbol_table::GetSymbolPtrVectorBack();
+				assert(symbol_table::IsVarSymbol(arg_symbol_ptr->get_symbol_type()));
+				shared_ptr<VarSymbol> var_symbol_ptr = dynamic_pointer_cast<VarSymbol>(arg_symbol_ptr);
+				func_symbol_ptr->add_func_symbol_args_ptr(var_symbol_ptr);
+			}
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			while (token.get_token_sym() == COMMA) {
+		}
+		while (token.get_token_sym() == COMMA) {
+			grammar::OutputToken(token);
+			token = grammar::GetToken();
+			if (token.get_token_sym() != INTTK && token.get_token_sym() != CHARTK) {
+				// 参数表中,后不是int 或 char，如果是这样后面的标识符也不读了，因为无法判断标识符类型
+				// error();
+			}
+			else {
+				var_symbol_type = IntVarSym;
+				if (token.get_token_sym() == CHARTK) {
+					var_symbol_type = CharVarSym;
+				}
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
-				if (token.get_token_sym() != INTTK && token.get_token_sym() != CHARTK) {
+				if (token.get_token_sym() != IDENFR) {
+					// 参数表中int 或 char后没有标识符
 					// error();
-					if (GRAMMAR_OUTPUT_DEBUG) {
-						output_file << "para_tlb got " << token.get_token_str() << " not INTTK or CHARTK" << endl;
-					}
 				}
 				else {
+					if (!symbol_table::AddVarSymbol(token.get_token_str(), var_symbol_type, subprogram_level_stack.top())) {
+						error::OutputError(token.get_line(), NameRedefine);
+					}
+					else if (func_symbol_ptr) {
+						shared_ptr<Symbol> arg_symbol_ptr = symbol_table::GetSymbolPtrVectorBack();
+						assert(symbol_table::IsVarSymbol(arg_symbol_ptr->get_symbol_type()));
+						shared_ptr<VarSymbol> var_symbol_ptr = dynamic_pointer_cast<VarSymbol>(arg_symbol_ptr);
+						func_symbol_ptr->add_func_symbol_args_ptr(var_symbol_ptr);
+					}
 					grammar::OutputToken(token);
 					token = grammar::GetToken();
-					if (token.get_token_sym() != IDENFR) {
-						// error();
-						if (GRAMMAR_OUTPUT_DEBUG) {
-							output_file << "para_tlb got " << token.get_token_str() << " not IDENFR" << endl;
-						}
-					}
-					else {
-						grammar::OutputToken(token);
-						token = grammar::GetToken();
-					}
 				}
 			}
 		}
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<参数表>" << endl;
-	}
+	grammar::OutputGrammarElementName("<参数表>");
 }
 
 // <主函数>::=void main '(' ')' '{' <复合语句> '}'
 void grammar::main_func() {
-	if (token.get_token_sym() != VOIDTK) {
-		// error();
-		if (GRAMMAR_OUTPUT_DEBUG) {
-			output_file << "main_func got " << token.get_token_str() << " not VOIDTK" << endl;
-		}
-	}
-	else {
-		grammar::OutputToken(token);
-		token = grammar::GetToken();
-		if (token.get_token_sym() != MAINTK) {
-			// error();
-			if (GRAMMAR_OUTPUT_DEBUG) {
-				output_file << "main_func got " << token.get_token_str() << " not MAINTK" << endl;
-			}
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-			if (token.get_token_sym() != LPARENT) {
-				// error();
-				if (GRAMMAR_OUTPUT_DEBUG) {
-					output_file << "main_func got " << token.get_token_str() << " not LPARENT" << endl;
-				}
-			}
-			else {
-				grammar::OutputToken(token);
-				token = grammar::GetToken();
-				if (token.get_token_sym() != RPARENT) {
-					// error();
-					if (GRAMMAR_OUTPUT_DEBUG) {
-						output_file << "main_func got " << token.get_token_str() << " not RPRAENT" << endl;
-					}
-				}
-				else {
-					grammar::OutputToken(token);
-					token = grammar::GetToken();
-					if (token.get_token_sym() != LBRACE) {
-						// error();
-						if (GRAMMAR_OUTPUT_DEBUG) {
-							output_file << "main_func got " << token.get_token_str() << " not LBRACE" << endl;
-						}
-					}
-					else {
-						grammar::OutputToken(token);
-						token = grammar::GetToken();
-						grammar::compound_statements();
-						if (token.get_token_sym() != RBRACE) {
-							// error();
-							if (GRAMMAR_OUTPUT_DEBUG) {
-								output_file << "main_func got " << token.get_token_str() << " not RBRACE" << endl;
-							}
-						}
-						else {
-							grammar::OutputToken(token);
-							token = grammar::GetToken();
-						}
-					}
-				}
-			}
-		}
-	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<主函数>" << endl;
-	}
+	return_state = InNoRetFunc;
+	ExpectedOrError(VOIDTK);
+	ExpectedOrError(MAINTK);
+	ExpectedOrError(LPARENT);
+	ExpectedOrError(RPARENT);
+	ExpectedOrError(LBRACE);
+
+	grammar::GetIntoNewLevel();
+	grammar::compound_statements();
+	grammar::ExitCurLevel();
+
+	ExpectedOrError(RBRACE);
+	grammar::OutputGrammarElementName("<主函数>");
 }
 
 // <复合语句>::=[<常量说明>][<变量说明>]<语句列>
@@ -519,9 +411,7 @@ void grammar::compound_statements() {
 		grammar::var_declaration();
 	}
 	grammar::statement_list();
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<复合语句>" << endl;
-	}
+	grammar::OutputGrammarElementName("<复合语句>");
 }
 
 // <语句列>::={<语句>}
@@ -529,52 +419,21 @@ void grammar::statement_list() {
 	while (grammar::is_statement()) {
 		grammar::statement();
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<语句列>" << endl;
-	}
+	grammar::OutputGrammarElementName("<语句列>");
 }
 
 // <常量说明>::=const<常量定义>;{const<常量定义>;}
 void grammar::const_declaration() {
-	if (token.get_token_sym() != CONSTTK) {
-		// error();
-		if (GRAMMAR_OUTPUT_DEBUG) {
-			output_file << "const_declaration got " << token.get_token_str() << " not CONST" << endl;
-		}
-	}
-	else {
+	ExpectedOrError(CONSTTK);
+	grammar::const_def();
+	ExpectedOrError(SEMICN);
+	while (token.get_token_sym() == CONSTTK) {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		grammar::const_def();
-		if (token.get_token_sym() != SEMICN) {
-			// error();
-			if (GRAMMAR_OUTPUT_DEBUG) {
-				output_file << "const_declaration got " << token.get_token_str() << ", but need a SEMICN to end const_def" << endl;
-			}
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-			while (token.get_token_sym() == CONSTTK) {
-				grammar::OutputToken(token);
-				token = grammar::GetToken();
-				grammar::const_def();
-				if (token.get_token_sym() != SEMICN) {
-					// error();
-					if (GRAMMAR_OUTPUT_DEBUG) {
-						output_file << "const_declaration got " << token.get_token_str() << ", but need a SEMICN to end const_def" << endl;
-					}
-				}
-				else {
-					grammar::OutputToken(token);
-					token = grammar::GetToken();
-				}
-			}
-		}
+		ExpectedOrError(SEMICN);
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<常量说明>" << endl;
-	}
+	grammar::OutputGrammarElementName("<常量说明>");
 }
 
 // <常量定义>::=int<标识符>=<整数>{,<标识符>=<整数>} | char <标识符>=<字符>{,<标识符>=<字符>}
@@ -583,121 +442,86 @@ void grammar::const_def() {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		if (token.get_token_sym() != IDENFR) {
+			// int后没有标识符
 			// error();
 		}
 		else {
+			if (!symbol_table::AddVarSymbol(token.get_token_str(), IntConSym, subprogram_level_stack.top())) {
+				error::OutputError(token.get_line(), NameRedefine);
+			}
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			if (token.get_token_sym() != ASSIGN) {
+		}
+		ExpectedOrError(ASSIGN);
+		grammar::integer();
+		while (token.get_token_sym() == COMMA) {
+			grammar::OutputToken(token);
+			token = grammar::GetToken();
+			if (token.get_token_sym() != IDENFR) {
+				// ,后面没有标识符
 				// error();
 			}
 			else {
+				if (!symbol_table::AddVarSymbol(token.get_token_str(), IntConSym, subprogram_level_stack.top())) {
+					error::OutputError(token.get_line(), NameRedefine);
+				}
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
-				grammar::integer();
-				while (token.get_token_sym() == COMMA) {
-					grammar::OutputToken(token);
-					token = grammar::GetToken();
-					if (token.get_token_sym() != IDENFR) {
-						// error();
-					}
-					else {
-						grammar::OutputToken(token);
-						token = grammar::GetToken();
-						if (token.get_token_sym() != ASSIGN) {
-							// error();
-						}
-						else {
-							grammar::OutputToken(token);
-							token = grammar::GetToken();
-							grammar::integer();
-						}
-					}
-				}
 			}
+			ExpectedOrError(ASSIGN);
+			grammar::integer();
 		}
 	}
 	else if (token.get_token_sym() == CHARTK) {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		if (token.get_token_sym() != IDENFR) {
+			// ,后面没有标识符
 			// error();
 		}
 		else {
+			if (!symbol_table::AddVarSymbol(token.get_token_str(), CharConSym, subprogram_level_stack.top())) {
+				error::OutputError(token.get_line(), NameRedefine);
+			}
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			if (token.get_token_sym() != ASSIGN) {
+		}
+		ExpectedOrError(ASSIGN);
+		ExpectedOrError(CHARCON);
+		while (token.get_token_sym() == COMMA) {
+			grammar::OutputToken(token);
+			token = grammar::GetToken();
+			if (token.get_token_sym() != IDENFR) {
+				// ,后面没有标识符
 				// error();
 			}
 			else {
+				if (!symbol_table::AddVarSymbol(token.get_token_str(), CharConSym, subprogram_level_stack.top())) {
+					error::OutputError(token.get_line(), NameRedefine);
+				}
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
-				if (token.get_token_sym() != CHARCON) {
-					// error();
-				}
-				else {
-					grammar::OutputToken(token);
-					token = grammar::GetToken();
-					while (token.get_token_sym() == COMMA) {
-						grammar::OutputToken(token);
-						token = grammar::GetToken();
-						if (token.get_token_sym() != IDENFR) {
-							// error();
-						}
-						else {
-							grammar::OutputToken(token);
-							token = grammar::GetToken();
-							if (token.get_token_sym() != ASSIGN) {
-								// error();
-							}
-							else {
-								grammar::OutputToken(token);
-								token = grammar::GetToken();
-								if (token.get_token_sym() != CHARCON) {
-									// error();
-								}
-								else {
-									grammar::OutputToken(token);
-									token = grammar::GetToken();
-								}
-							}
-						}
-					}
-				}
 			}
+			ExpectedOrError(ASSIGN);
+			ExpectedOrError(CHARCON);
 		}
 	}
 	else {
+		// const后既不是int也不是char，无法判断类型，是不是应该跳读至;
 		// error();
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<常量定义>" << endl;
-	}
+	grammar::OutputGrammarElementName("<常量定义>");
 }
 
 // <变量说明>::=<变量定义>;{<变量定义>;}
 void grammar::var_declaration() {
 	grammar::var_def();
-	if (token.get_token_sym() != SEMICN) {
-		// error();	
-	}
-	else {
-		grammar::OutputToken(token);
-		token = grammar::GetToken();
-	}
+	ExpectedOrError(SEMICN);
 	while (grammar::is_var_declaration()) {
 		grammar::var_def();
-		if (token.get_token_sym() != SEMICN) {
-			// error();
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-		}
+		ExpectedOrError(SEMICN);
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<变量说明>" << endl;
-	}
+	grammar::OutputGrammarElementName("<变量说明>");
 }
 
 // <变量定义>::=<变量定义无初始化> | <变量定义及初始化>
@@ -705,49 +529,60 @@ void grammar::var_def() {
 	if (grammar::is_var_def_with_init()) {
 		grammar::var_def_with_init();
 	}
-	else if (grammar::is_var_def_no_init()) {
+	else {
 		grammar::var_def_no_init();
 	}
-	else {
-		// error();
-	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<变量定义>" << endl;
-	}
+	grammar::OutputGrammarElementName("<变量定义>");
 }
 
-void grammar::var_def_no_init_while() {
+void grammar::var_def_no_init_while(int symbol_type_sym) {
 	while (token.get_token_sym() == COMMA) {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		if (token.get_token_sym() != IDENFR) {
+			// ','后面没有标识符
 			// error();
 		}
 		else {
+			string symbol_name = token.get_token_str();
+			int symbol_line = token.get_line();
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 			if (token.get_token_sym() == LBRACK) {
+				SymbolType symbol_type = IntArrSym;
+				if (symbol_type_sym == CHARTK) {
+					symbol_type = CharArrSym;
+				}
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
-				grammar::unsigned_integer();
-				if (token.get_token_sym() != RBRACK) {
-					// error();
-				}
-				else {
+				int arr_symbol_dim_1 = grammar::unsigned_integer();
+				int arr_symbol_dim_2 = -1;
+				/*
+				这边可能存在报错先后问题，如果遇到名字重定义且']'缺失的情况，
+				理论上应该先报名字重定义，再报']'缺失，
+				但是如果该程序运行是先报']'缺失，再报名字重定义。
+				不过由于无恶意换行且单行只有一个错误的限制，不会出现上述情况，不过之后可以略微修改。
+				*/
+				ExpectedOrError(RBRACK);
+				if (token.get_token_sym() == LBRACK) {
 					grammar::OutputToken(token);
 					token = grammar::GetToken();
-					if (token.get_token_sym() == LBRACK) {
-						grammar::OutputToken(token);
-						token = grammar::GetToken();
-						grammar::unsigned_integer();
-						if (token.get_token_sym() != RBRACK) {
-							// error();
-						}
-						else {
-							grammar::OutputToken(token);
-							token = grammar::GetToken();
-						}
-					}
+					arr_symbol_dim_2 = grammar::unsigned_integer();
+					ExpectedOrError(RBRACK);
+				}
+				if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, arr_symbol_dim_2)) {
+					error::OutputError(symbol_line, NameRedefine);
+				}
+			}
+			else {
+				SymbolType symbol_type = IntVarSym;
+				if (symbol_type_sym == CHARTK) {
+					symbol_type = CharVarSym;
+				}
+				if (!symbol_table::AddVarSymbol(symbol_name, symbol_type, subprogram_level_stack.top())) {
+					// 名字重定义
+					// 已经读到标识符的下一个token，所以last_token才是标识符
+					error::OutputError(last_token.get_line(), NameRedefine);
 				}
 			}
 		}
@@ -765,55 +600,77 @@ void grammar::var_def_no_init_while() {
 */
 void grammar::var_def_no_init() {
 	if (token.get_token_sym() != INTTK && token.get_token_sym() != CHARTK) {
+		// 变量定义初始化开头不是int或char，似乎不会出现这种情况，因为都是经过预读的
 		// error();
 	}
 	else {	// <类型标识符>
+		int symbol_type_sym = token.get_token_sym();
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		if (token.get_token_sym() != IDENFR) {
+			// int 或 char没有标识符，应该跳读至,或;
 			// error();
 		}
 		else {	// <类型标识符> <标识符>
+			string symbol_name = token.get_token_str();
+			int symbol_line = token.get_line();
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 			if (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>,
-				grammar::var_def_no_init_while();
+				// 读到','说明一个变量定义无初始化结束了，应该加入到符号表中
+				SymbolType symbol_type = IntVarSym;
+				if (symbol_type_sym == CHARTK) {
+					symbol_type = CharVarSym;
+				}
+				if (!symbol_table::AddVarSymbol(symbol_name, symbol_type, subprogram_level_stack.top())) {
+					// 名字重定义
+					error::OutputError(symbol_line, NameRedefine);
+				}
+				grammar::var_def_no_init_while(symbol_type_sym);
 			}
 			else if (token.get_token_sym() == LBRACK) {	//<类型标识符> <标识符>[
+				SymbolType symbol_type = IntArrSym;
+				if (symbol_type_sym == CHARTK) {
+					symbol_type = CharArrSym;
+				}
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
-				grammar::unsigned_integer();
-				if (token.get_token_sym() != RBRACK) {
-					// error();
+				int arr_symbol_dim_1 = grammar::unsigned_integer();
+				ExpectedOrError(RBRACK);	// <类型标识符> <标识符>[<无符号整数>]
+				if (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>[<无符号整数>],
+					if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, -1)) {
+						error::OutputError(symbol_line, NameRedefine);
+					}
+					grammar::var_def_no_init_while(symbol_type_sym);
 				}
-				else {	// <类型标识符> <标识符>[<无符号整数>]
+				else if (token.get_token_sym() == LBRACK) {	// <类型标识符> <标识符>[<无符号整数>][
 					grammar::OutputToken(token);
 					token = grammar::GetToken();
-					if (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>[<无符号整数>],
-						grammar::var_def_no_init_while();
+					int arr_symbol_dim_2 = grammar::unsigned_integer();
+					ExpectedOrError(RBRACK);	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]
+					if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, arr_symbol_dim_2)) {
+						error::OutputError(symbol_line, NameRedefine);
 					}
-					else if (token.get_token_sym() == LBRACK) {	// <类型标识符> <标识符>[<无符号整数>][
-						grammar::OutputToken(token);
-						token = grammar::GetToken();
-						grammar::unsigned_integer();
-						if (token.get_token_sym() != RBRACK) {
-							// error();
-						}
-						else {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]
-							grammar::OutputToken(token);
-							token = grammar::GetToken();
-							if (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>],
-								grammar::var_def_no_init_while();
-							}
-						}
+					if (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>],
+						grammar::var_def_no_init_while(symbol_type_sym);
 					}
+				}
+				else if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, -1)){
+					error::OutputError(symbol_line, NameRedefine);
+				}
+			}
+			else {
+				SymbolType symbol_type = IntVarSym;
+				if (symbol_type_sym == CHARTK) {
+					symbol_type = CharVarSym;
+				}
+				if (!symbol_table::AddVarSymbol(symbol_name, symbol_type, subprogram_level_stack.top())) {
+					error::OutputError(symbol_line, NameRedefine);
 				}
 			}
 		}
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<变量定义无初始化>" << endl;
-	}
+	grammar::OutputGrammarElementName("<变量定义无初始化>");
 }
 
 /*
@@ -823,146 +680,133 @@ void grammar::var_def_no_init() {
 */
 void grammar::var_def_with_init() {
 	if (token.get_token_sym() != INTTK && token.get_token_sym() != CHARTK) {
-		// error();
+		// 该情况不会出现，因为进入<变量定义及初始化>需要预读
 	}
 	else {	// <类型标识符>
+		int symbol_type_sym = token.get_token_sym();
+		ExprType expr_type = IntExpr;
+		if (symbol_type_sym == CHARTK) {
+			expr_type = CharExpr;
+		}
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		if (token.get_token_sym() != IDENFR) {
-			// error();
+			// 该情况不会出现，因为进入<变量定义及初始化>需要预读
 		}
 		else {	// <类型标识符> <标识符>
+			string symbol_name = token.get_token_str();
+			int symbol_line = token.get_line();
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 			if (token.get_token_sym() == ASSIGN) {	// <类型标识符> <标识符>=
-				grammar::OutputToken(token);
-				token = grammar::GetToken();
-				grammar::const_sym();	// <类型标识符> <标识符>=<常量>
-			}
-			else if (token.get_token_sym() == LBRACK) {	// <类型标识符> <标识符>[
-				grammar::OutputToken(token);
-				token = grammar::GetToken();
-				grammar::unsigned_integer();
-				if (token.get_token_sym() != RBRACK) {
-					// error();
+				// 即使在'='后面出现了问题，该变量还是被加入了符号表
+				
+				SymbolType symbol_type = IntVarSym;
+				if (symbol_type_sym == CHARTK) {
+					symbol_type = CharVarSym;
 				}
-				else {	// <类型标识符> <标识符>[<无符号整数>]
+
+				if (!symbol_table::AddVarSymbol(symbol_name, symbol_type, subprogram_level_stack.top())) {
+					error::OutputError(symbol_line, NameRedefine);
+				}
+				grammar::OutputToken(token);
+				token = grammar::GetToken();
+				grammar::const_sym(expr_type);	// <类型标识符> <标识符>=<常量>
+			}
+			else if (token.get_token_sym() == LBRACK) {	// <类型标识符> <标识符>'['
+				
+				SymbolType symbol_type = IntArrSym;
+				if (symbol_type_sym == CHARTK) {
+					symbol_type = CharArrSym;
+				}
+				grammar::OutputToken(token);
+				token = grammar::GetToken();
+				int arr_symbol_dim_1 = grammar::unsigned_integer();
+				int arr_symbol_dim_2 = -1;
+				// 此处也可能有报错先后问题
+				ExpectedOrError(RBRACK);	// <类型标识符> <标识符>'['<无符号整数>']'
+				if (token.get_token_sym() == ASSIGN) {	// <类型标识符> <标识符>'['<无符号整数>']'=
+					if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, -1)) {
+						error::OutputError(symbol_line, NameRedefine);
+					}
 					grammar::OutputToken(token);
 					token = grammar::GetToken();
-					if (token.get_token_sym() == ASSIGN) {	// <类型标识符> <标识符>[<无符号整数>]=
+					ExpectedOrError(LBRACE);	// <类型标识符> <标识符>'['<无符号整数>']'='{'
+					int const_sym_num_1 = 0;
+					grammar::const_sym(expr_type);	// <类型标识符> <标识符>'['<无符号整数>']'='{'<常量>
+					const_sym_num_1 += 1;
+					while (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>'['<无符号整数>']'='{'<常量>,{<常量>}
 						grammar::OutputToken(token);
 						token = grammar::GetToken();
-						if (token.get_token_sym() != LBRACE) {
-							// error();
-						}
-						else {	// <类型标识符> <标识符>[<无符号整数>]={
-							grammar::OutputToken(token);
-							token = grammar::GetToken();
-							grammar::const_sym();	// <类型标识符> <标识符>[<无符号整数>]={<常量>
-							while (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>[<无符号整数>]={<常量>,{<常量>}
-								grammar::OutputToken(token);
-								token = grammar::GetToken();
-								grammar::const_sym();
-							}
-							if (token.get_token_sym() != RBRACE) {
-								// error();
-							}
-							else {	// <类型标识符> <标识符>[<无符号整数>]={<常量>,{<常量>}
-								grammar::OutputToken(token);
-								token = grammar::GetToken();
-							}
-						}
+						grammar::const_sym(expr_type);
+						const_sym_num_1 += 1;
 					}
-					else if (token.get_token_sym() == LBRACK) {	// <类型标识符> <标识符>[<无符号整数>][
+					if (const_sym_num_1 != arr_symbol_dim_1) {
+						error::OutputError(token.get_line(), ArrInitNotMatch);
+					}
+					ExpectedOrError(RBRACE);	// <类型标识符> <标识符>'['<无符号整数>']'='{'<常量>,{<常量>}'}'
+				}
+				else if (token.get_token_sym() == LBRACK) {	// <类型标识符> <标识符>'['<无符号整数>']''['
+					grammar::OutputToken(token);
+					token = grammar::GetToken();
+					arr_symbol_dim_2 = grammar::unsigned_integer();
+					// 此处也可能有报错先后问题
+					ExpectedOrError(RBRACK);	// <类型标识符> <标识符>'['<无符号整数>']''['<无符号整数>']'
+					if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, arr_symbol_dim_2)) {
+						error::OutputError(symbol_line, NameRedefine);
+					}
+					ExpectedOrError(ASSIGN);	// <类型标识符> <标识符>'['<无符号整数>']''['<无符号整数>']'=
+					ExpectedOrError(LBRACE);	// <类型标识符> <标识符>'['<无符号整数>']''['<无符号整数>']'='{'
+					int const_sym_num_1 = 0;
+					ExpectedOrError(LBRACE);	// <类型标识符> <标识符>'['<无符号整数>']''['<无符号整数>']'='{''{'
+					const_sym_num_1 += 1;
+					int const_sym_num_2 = 0;
+					grammar::const_sym(expr_type);	// <类型标识符> <标识符>'['<无符号整数>']''['<无符号整数>']'='{''{'<常量>
+					const_sym_num_2 += 1;
+					while (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>'['<无符号整数>']''['<无符号整数>']'='{''{'<常量>,{<常量>}
 						grammar::OutputToken(token);
 						token = grammar::GetToken();
-						grammar::unsigned_integer();
-						if (token.get_token_sym() != RBRACK) {
-							// error();
-						}
-						else {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]
+						grammar::const_sym(expr_type);
+						const_sym_num_2 += 1;
+					}
+					if (const_sym_num_2 != arr_symbol_dim_2) {
+						error::OutputError(token.get_line(), ArrInitNotMatch);
+					}
+					ExpectedOrError(RBRACE);	// <类型标识符> <标识符>'['<无符号整数>']''['<无符号整数>']'='{''{'<常量>,{<常量>}'}'
+					while (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3},
+						grammar::OutputToken(token);
+						token = grammar::GetToken();
+						ExpectedOrError(LBRACE);	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {
+						const_sym_num_1 += 1;
+						const_sym_num_2 = 0;
+						grammar::const_sym(expr_type);	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4
+						const_sym_num_2 += 1;
+						while (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4,
 							grammar::OutputToken(token);
 							token = grammar::GetToken();
-							if (token.get_token_sym() != ASSIGN) {
-								// error();
-							}
-							else {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]=
-								grammar::OutputToken(token);
-								token = grammar::GetToken();
-								if (token.get_token_sym() != LBRACE) {
-									// error();
-								}
-								else {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={
-									grammar::OutputToken(token);
-									token = grammar::GetToken();
-									if (token.get_token_sym() != LBRACE) {
-										// error();
-									}
-									else {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{
-										grammar::OutputToken(token);
-										token = grammar::GetToken();
-										grammar::const_sym();	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{<常量>
-										while (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{<常量>,{<常量>}
-											grammar::OutputToken(token);
-											token = grammar::GetToken();
-											grammar::const_sym();
-										}
-										if (token.get_token_sym() != RBRACE) {
-											// error();
-										}
-										else {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{<常量>,{<常量>}}
-											grammar::OutputToken(token);
-											token = grammar::GetToken();
-											while (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3},
-												grammar::OutputToken(token);
-												token = grammar::GetToken();
-												if (token.get_token_sym() != LBRACE) {
-													// error();
-												}
-												else {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {
-													grammar::OutputToken(token);
-													token = grammar::GetToken();
-													grammar::const_sym();	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4
-													while (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4,
-														grammar::OutputToken(token);
-														token = grammar::GetToken();
-														grammar::const_sym();	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4, 5
-													}
-													if (token.get_token_sym() != RBRACE) {
-														// error();
-													}
-													else {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4, 5}
-														grammar::OutputToken(token);
-														token = grammar::GetToken();
-													}
-												}
-											}
-											if (token.get_token_sym() != RBRACE) {
-												// error();
-											}
-											else {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4, 5}, ...}
-												grammar::OutputToken(token);
-												token = grammar::GetToken();
-											}
-										}
-									}
-								}
-							}
+							grammar::const_sym(expr_type);	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4, 5
+							const_sym_num_2 += 1;
 						}
+						if (const_sym_num_2 != arr_symbol_dim_2) {
+							error::OutputError(token.get_line(), ArrInitNotMatch);
+						}
+						ExpectedOrError(RBRACE);	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4, 5}
 					}
-					else {
-						//error();
+					if (const_sym_num_1 != arr_symbol_dim_1) {
+						error::OutputError(token.get_line(), ArrInitNotMatch);
 					}
+					ExpectedOrError(RBRACE);	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4, 5}, ...}
+				}
+				else {
+					// 该情况不会出现，因为进入<变量定义及初始化>需要预读
 				}
 			}
 			else {
-				// error();
+				// 该情况不会出现，因为进入<变量定义及初始化>需要预读
 			}
 		}
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<变量定义及初始化>" << endl;
-	}
+	grammar::OutputGrammarElementName("<变量定义及初始化>");
 }
 
 /*
@@ -976,55 +820,31 @@ void grammar::statement() {
 	else if (token.get_token_sym() == IFTK) {
 		grammar::condition_statement();
 	}
-	else if (grammar::is_func_call_with_ret()) {
-		grammar::func_call_with_ret();
-		if (token.get_token_sym() != SEMICN) {
-			// error();
+	else if (grammar::is_func_call()) {
+		/*
+		如果符号表中能查到标识符确实是有返回值函数，
+		就是<有返回函数调用语句>，否则就是<无返回值函数调用语句>；
+		如果实际上这个标识符没有被定义，在<无返回值函数调用语句>，就直接跳过这句话到分号
+		*/
+		if (grammar::is_func_call_with_ret()) {
+			grammar::func_call_with_ret();
 		}
 		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
+			grammar::func_call_no_ret();
 		}
-	}
-	else if (grammar::is_func_call_no_ret()) {
-		grammar::func_call_no_ret();
-		if (token.get_token_sym() != SEMICN) {
-			// error();
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-		}
+		ExpectedOrError(SEMICN);
 	}
 	else if (token.get_token_sym() == IDENFR) {
 		grammar::assign_statement();
-		if (token.get_token_sym() != SEMICN) {
-			// error();
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-		}
+		ExpectedOrError(SEMICN);
 	}
 	else if (token.get_token_sym() == SCANFTK) {
 		grammar::input_statement();
-		if (token.get_token_sym() != SEMICN) {
-			// error();
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-		}
+		ExpectedOrError(SEMICN);
 	}
 	else if (token.get_token_sym() == PRINTFTK) {
 		grammar::output_statement();
-		if (token.get_token_sym() != SEMICN) {
-			// error();
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-		}
+		ExpectedOrError(SEMICN);
 	}
 	else if (token.get_token_sym() == SWITCHTK) {
 		grammar::case_statement();
@@ -1035,29 +855,15 @@ void grammar::statement() {
 	}
 	else if (token.get_token_sym() == RETURNTK) {
 		grammar::ret_statement();
-		if (token.get_token_sym() != SEMICN) {
-			// error();
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-		}
+		ExpectedOrError(SEMICN);
 	}
 	else if (token.get_token_sym() == LBRACE) {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		grammar::statement_list();
-		if (token.get_token_sym() != RBRACE) {
-			// error();
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-		}
+		ExpectedOrError(RBRACE);
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<语句>" << endl;
-	}
+	grammar::OutputGrammarElementName("<语句>");
 }
 
 /*
@@ -1068,168 +874,122 @@ void grammar::loop_statement() {
 	if (token.get_token_sym() == WHILETK) {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
-		if (token.get_token_sym() != LPARENT) {
-			// error();
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-			grammar::condition();
-			if (token.get_token_sym() != RPARENT) {
-				// error();
-			}
-			else {
-				grammar::OutputToken(token);
-				token = grammar::GetToken();
-				statement();
-			}
-		}
+		ExpectedOrError(LPARENT);
+		grammar::condition();
+		ExpectedOrError(RPARENT);
+		statement();
 	}
 	else if (token.get_token_sym() == FORTK) {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
-		if (token.get_token_sym() != LPARENT) {
+		ExpectedOrError(LPARENT);
+		if (token.get_token_sym() != IDENFR) {
+			// error();
+		}
+		else {
+			string symbol_name = token.get_token_str();
+			int symbol_line = token.get_line();
+			if (!symbol_table::IsNameDefined(symbol_name)) {
+				error::OutputError(symbol_line, NameNotDefine);
+			}
+			if (symbol_table::IsConSymbol(symbol_table::GetSymbolLatestType(symbol_name))) {
+				error::OutputError(symbol_line, ModifyConst);
+			}
+			grammar::OutputToken(token);
+			token = grammar::GetToken();
+		}
+		ExpectedOrError(ASSIGN);
+		grammar::expr();
+		ExpectedOrError(SEMICN);
+		grammar::condition();
+		ExpectedOrError(SEMICN);
+		if (token.get_token_sym() != IDENFR) {
+			// error();
+		}
+		else {
+			string symbol_name = token.get_token_str();
+			int symbol_line = token.get_line();
+			if (!symbol_table::IsNameDefined(symbol_name)) {
+				error::OutputError(symbol_line, NameNotDefine);
+			}
+			if (symbol_table::IsConSymbol(symbol_table::GetSymbolLatestType(symbol_name))) {
+				error::OutputError(symbol_line, ModifyConst);
+			}
+			if (symbol_table::GetSymbolLatestType(token.get_token_str()))
+				grammar::OutputToken(token);
+			token = grammar::GetToken();
+		}
+		ExpectedOrError(ASSIGN);
+		if (token.get_token_sym() != IDENFR) {
+			// error();
+		}
+		else {
+			if (!symbol_table::IsNameDefined(token.get_token_str())) {
+				error::OutputError(token.get_line(), NameNotDefine);
+			}
+			grammar::OutputToken(token);
+			token = grammar::GetToken();
+		}
+		if (token.get_token_sym() != PLUS && token.get_token_sym() != MINU) {
 			// error();
 		}
 		else {
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			if (token.get_token_sym() != IDENFR) {
-				// error();
-			}
-			else {
-				grammar::OutputToken(token);
-				token = grammar::GetToken();
-				if (token.get_token_sym() != ASSIGN) {
-					// error();
-				}
-				else {
-					grammar::OutputToken(token);
-					token = grammar::GetToken();
-					grammar::expr();
-					if (token.get_token_sym() != SEMICN) {
-						// error();
-					}
-					else {
-						grammar::OutputToken(token);
-						token = grammar::GetToken();
-						grammar::condition();
-						if (token.get_token_sym() != SEMICN) {
-							// error();
-						}
-						else {
-							grammar::OutputToken(token);
-							token = grammar::GetToken();
-							if (token.get_token_sym() != IDENFR) {
-								// error();
-							}
-							else {
-								grammar::OutputToken(token);
-								token = grammar::GetToken();
-								if (token.get_token_sym() != ASSIGN) {
-									// error();
-								}
-								else {
-									grammar::OutputToken(token);
-									token = grammar::GetToken();
-									if (token.get_token_sym() != IDENFR) {
-										// error();
-									}
-									else {
-										grammar::OutputToken(token);
-										token = grammar::GetToken();
-										if (token.get_token_sym() != PLUS && token.get_token_sym() != MINU) {
-											// error();
-										}
-										else {
-											grammar::OutputToken(token);
-											token = grammar::GetToken();
-											grammar::step();
-											if (token.get_token_sym() != RPARENT) {
-												// error();
-											}
-											else {
-												grammar::OutputToken(token);
-												token = grammar::GetToken();
-												grammar::statement();
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
 		}
+		grammar::step();
+		ExpectedOrError(RPARENT);
+		grammar::statement();
 	}
 	else {
+		// 这种情况应该不会发生，因为是经过预读进入<循环语句>的
 		// error();
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<循环语句>" << endl;
-	}
+	grammar::OutputGrammarElementName("<循环语句>");
 }
 
 // <步长>::=<无符号整数>
 void grammar::step() {
 	grammar::unsigned_integer();
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<步长>" << endl;
-	}
+	grammar::OutputGrammarElementName("<步长>");
 }
 
 // <条件语句>::=if'('<条件>')'<语句>[else<语句>]
 void grammar::condition_statement() {
-	if (token.get_token_sym() != IFTK) {
-		// error();
-	}
-	else {
+	ExpectedOrError(IFTK);
+	ExpectedOrError(LPARENT);
+	grammar::condition();
+	ExpectedOrError(RPARENT);
+	grammar::statement();
+	if (token.get_token_sym() == ELSETK) {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
-		if (token.get_token_sym() != LPARENT) {
-			// error();
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-			grammar::condition();
-			if (token.get_token_sym() != RPARENT) {
-				// error();
-			}
-			else {
-				grammar::OutputToken(token);
-				token = grammar::GetToken();
-				grammar::statement();
-				if (token.get_token_sym() == ELSETK) {
-					grammar::OutputToken(token);
-					token = grammar::GetToken();
-					grammar::statement();
-				}
-			}
-		}
+		grammar::statement();
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<条件语句>" << endl;
-	}
+	grammar::OutputGrammarElementName("<条件语句>");
 }
 
 // <条件>::=<表达式><关系运算符><表达式>
 void grammar::condition() {
-	grammar::expr();
+	int expr_line = token.get_line();
+	if (grammar::expr() != IntExpr) {
+		error::OutputError(expr_line, ConditionJudgeInvalidType);
+	}
 	if (token.get_token_sym() != LSS && token.get_token_sym() != LEQ &&
 		token.get_token_sym() != GRE && token.get_token_sym() != GEQ &&
 		token.get_token_sym() != EQL && token.get_token_sym() != NEQ) {
+		// 应为关系运算符
 		// error();
 	}
 	else {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
-		grammar::expr();
+		expr_line = token.get_line();
+		if (grammar::expr() != IntExpr) {
+			error::OutputError(expr_line, ConditionJudgeInvalidType);
+		}
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<条件>" << endl;
-	}
+	grammar::OutputGrammarElementName("<条件>");
 }
 
 // <有返回值函数调用语句>::=<标识符>'('<值参数表>')'
@@ -1238,27 +998,37 @@ void grammar::func_call_with_ret() {
 		// error();
 	}
 	else {
-		grammar::OutputToken(token);
-		token = grammar::GetToken();
-		if (token.get_token_sym() != LPARENT) {
-			// error();
-		}
-		else {
+		string func_name = token.get_token_str();
+		if (!symbol_table::IsNameDefined(func_name)) {
+			/*
+			如果发现<未定义的名字>错误，首先报错，
+			然后因为一行只有一个错误，后面一定有';'结束这句话，所以就一直读到';'，退出这个子程序
+			*/
+			error::OutputError(token.get_line(), NameNotDefine);
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			grammar::value_para_tlb();
-			if (token.get_token_sym() != RPARENT) {
-				//	error();
-			}
-			else {
+			while (token.get_token_sym() != SEMICN) {
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
 			}
+			grammar::OutputGrammarElementName("<有返回值函数调用语句>");
+			return;
 		}
+		grammar::OutputToken(token);
+		token = grammar::GetToken();
+		ExpectedOrError(LPARENT);
+		vector<ExprType> value_para_type_syms = grammar::value_para_tlb();
+		// 此时token已经读到右小括号了，但是不存在恶意换行，所以可以直接用token.get_line()
+		int check_para_rst = symbol_table::CheckPara(func_name, value_para_type_syms);
+		if (check_para_rst == 1) {
+			error::OutputError(token.get_line(), ArgsNumNotMatch);
+		}
+		else if (check_para_rst == 2) {
+			error::OutputError(token.get_line(), ArgsTypeNotMatch);
+		}
+		ExpectedOrError(RPARENT);
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<有返回值函数调用语句>" << endl;
-	}
+	grammar::OutputGrammarElementName("<有返回值函数调用语句>");
 }
 
 // <无返回值函数调用语句>::=<标识符>'('<值参数表>')'
@@ -1267,42 +1037,54 @@ void grammar::func_call_no_ret() {
 		// error();
 	}
 	else {
-		grammar::OutputToken(token);
-		token = grammar::GetToken();
-		if (token.get_token_sym() != LPARENT) {
-			// error();
-		}
-		else {
+		string func_name = token.get_token_str();
+		if (!symbol_table::IsNameDefined(func_name)) {
+			/*
+			如果发现<未定义的名字>错误，首先报错，
+			然后因为一行只有一个错误，后面一定有';'结束这句话，所以就一直读到';'，退出这个子程序
+			*/
+			error::OutputError(token.get_line(), NameNotDefine);
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			grammar::value_para_tlb();
-			if (token.get_token_sym() != RPARENT) {
-				//	error();
-			}
-			else {
+			while (token.get_token_sym() != SEMICN) {
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
 			}
+			grammar::OutputGrammarElementName("<无返回值函数调用语句>");
+			return;
 		}
+		grammar::OutputToken(token);
+		token = grammar::GetToken();
+		ExpectedOrError(LPARENT);
+		vector<ExprType> value_para_type_syms = grammar::value_para_tlb();
+		// 此时token已经读到右小括号了，但是不存在恶意换行，所以可以直接用token.get_line()
+		CheckParaRlt check_para_rlt = symbol_table::CheckPara(func_name, value_para_type_syms);
+		if (check_para_rlt == ParaNumNotMatch) {
+			error::OutputError(token.get_line(), ArgsNumNotMatch);
+		}
+		else if (check_para_rlt == ParaTypeNotMatch) {
+			error::OutputError(token.get_line(), ArgsTypeNotMatch);
+		}
+		ExpectedOrError(RPARENT);
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<无返回值函数调用语句>" << endl;
-	}
+	grammar::OutputGrammarElementName("<无返回值函数调用语句>");
 }
 
 // <值参数表>::=<表达式>{,<表达式>} | <空>
-void grammar::value_para_tlb() {
+vector<ExprType> grammar::value_para_tlb() {
+	vector<ExprType> value_para_type_syms;
 	if (grammar::is_expr()) {
-		grammar::expr();
+		ExprType expr_type = grammar::expr();
+		value_para_type_syms.push_back(expr_type);
 		while (token.get_token_sym() == COMMA) {
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			grammar::expr();
+			expr_type = grammar::expr();
+			value_para_type_syms.push_back(expr_type);
 		}
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<值参数表>" << endl;
-	}
+	grammar::OutputGrammarElementName("<值参数表>");
+	return value_para_type_syms;
 }
 
 /*
@@ -1315,6 +1097,14 @@ void grammar::assign_statement() {
 		// error();
 	}
 	else {
+		string symbol_name = token.get_token_str();
+		int symbol_line = token.get_line();
+		if (!symbol_table::IsNameDefined(symbol_name)) {
+			error::OutputError(symbol_line, NameNotDefine);
+		}
+		if (symbol_table::IsConSymbol(symbol_table::GetSymbolLatestType(symbol_name))) {
+			error::OutputError(symbol_line, ModifyConst);
+		}
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		if (token.get_token_sym() == ASSIGN) {
@@ -1325,295 +1115,214 @@ void grammar::assign_statement() {
 		else if (token.get_token_sym() == LBRACK) {
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			grammar::expr();
-			if (token.get_token_sym() != RBRACK) {
-				// error();
+			if (grammar::expr() != IntExpr) {
+				error::OutputError(token.get_line(), ArrIndexNotInt);
 			}
-			else {
+			ExpectedOrError(RBRACK);
+			if (token.get_token_sym() == ASSIGN) {
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
-				if (token.get_token_sym() == ASSIGN) {
-					grammar::OutputToken(token);
-					token = grammar::GetToken();
-					grammar::expr();
+				grammar::expr();
+			}
+			else if (token.get_token_sym() == LBRACK) {
+				grammar::OutputToken(token);
+				token = grammar::GetToken();
+				if (grammar::expr() != IntExpr) {
+					error::OutputError(token.get_line(), ArrIndexNotInt);
 				}
-				else if (token.get_token_sym() == LBRACK) {
-					grammar::OutputToken(token);
-					token = grammar::GetToken();
-					grammar::expr();
-					if (token.get_token_sym() != RBRACK) {
-						// error();
-					}
-					else {
-						grammar::OutputToken(token);
-						token = grammar::GetToken();
-						if (token.get_token_sym() != ASSIGN) {
-							// error();
-						}
-						else {
-							grammar::OutputToken(token);
-							token = grammar::GetToken();
-							grammar::expr();
-						}
-					}
-				}
-				else {
-					// error();
-				}
+				ExpectedOrError(RBRACK);
+				ExpectedOrError(ASSIGN);
+				grammar::expr();
+			}
+			else {
+				// error();
 			}
 		}
 		else {
 			// error();
 		}
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<赋值语句>" << endl;
-	}
+	grammar::OutputGrammarElementName("<赋值语句>");
 }
 
 // <读语句>::=scanf'('<标识符>')'
 void grammar::input_statement() {
-	if (token.get_token_sym() != SCANFTK) {
+	ExpectedOrError(SCANFTK);
+	ExpectedOrError(LPARENT);
+	if (token.get_token_sym() != IDENFR) {
 		// error();
 	}
 	else {
+		string symbol_name = token.get_token_str();
+		int symbol_line = token.get_line();
+		if (!symbol_table::IsNameDefined(symbol_name)) {
+			error::OutputError(symbol_line, NameNotDefine);
+		}
+		if (symbol_table::IsConSymbol(symbol_table::GetSymbolLatestType(symbol_name))) {
+			error::OutputError(symbol_line, ModifyConst);
+		}
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
-		if (token.get_token_sym() != LPARENT) {
-			// error();
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-			if (token.get_token_sym() != IDENFR) {
-				// error();
-			}
-			else {
-				grammar::OutputToken(token);
-				token = grammar::GetToken();
-				if (token.get_token_sym() != RPARENT) {
-					// error();
-				}
-				else {
-					grammar::OutputToken(token);
-					token = grammar::GetToken();
-				}
-			}
-		}
+		ExpectedOrError(RPARENT);
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<读语句>" << endl;
-	}
+	grammar::OutputGrammarElementName("<读语句>");
 }
 
 // <写语句>::=printf'('<字符串>,<表达式>')' | printf'('<字符串>')' | printf'('<表达式>')'
 void grammar::output_statement() {
-	if (token.get_token_sym() != PRINTFTK) {
-		// error();
-	}
-	else {
-		grammar::OutputToken(token);
-		token = grammar::GetToken();
-		if (token.get_token_sym() != LPARENT) {
-			// error();
-		}
-		else {
+	ExpectedOrError(PRINTFTK);
+	ExpectedOrError(LPARENT);
+	if (token.get_token_sym() == STRCON) {
+		grammar::string_sym();
+		if (token.get_token_sym() == COMMA) {
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			if (token.get_token_sym() == STRCON) {
-				grammar::string_sym();
-				if (token.get_token_sym() == COMMA) {
-					grammar::OutputToken(token);
-					token = grammar::GetToken();
-					grammar::expr();
-					if (token.get_token_sym() != RPARENT) {
-						// error();
-					}
-					else {
-						grammar::OutputToken(token);
-						token = grammar::GetToken();
-					}
-				}
-				else if (token.get_token_sym() == RPARENT) {
-					grammar::OutputToken(token);
-					token = grammar::GetToken();
-				}
-				else {
-					// error();
-				}
-			}
-			else {
-				grammar::expr();
-				if (token.get_token_sym() != RPARENT) {
-					// error();
-				}
-				else {
-					grammar::OutputToken(token);
-					token = grammar::GetToken();
-				}
-			}
+			grammar::expr();
+			ExpectedOrError(RPARENT);
+		}
+		else if (token.get_token_sym() == RPARENT) {
+			grammar::OutputToken(token);
+			token = grammar::GetToken();
+		}
+		else {
+			// error();
 		}
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<写语句>" << endl;
+	else {
+		grammar::expr();
+		ExpectedOrError(RPARENT);
 	}
+	grammar::OutputGrammarElementName("<写语句>");
 }
 
 // <情况语句>::=switch '('<表达式>')' '{'<情况表><缺省>'}'
 void grammar::case_statement() {
-	if (token.get_token_sym() != SWITCHTK) {
-		// error();
-	}
-	else {
-		grammar::OutputToken(token);
-		token = grammar::GetToken();
-		if (token.get_token_sym() != LPARENT) {
-			// error();
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-			grammar::expr();
-			if (token.get_token_sym() != RPARENT) {
-				// error();
-			}
-			else {
-				grammar::OutputToken(token);
-				token = grammar::GetToken();
-				if (token.get_token_sym() != LBRACE) {
-					// error();
-				}
-				else {
-					grammar::OutputToken(token);
-					token = grammar::GetToken();
-					grammar::case_tlb();
-					grammar::default_statement();
-					if (token.get_token_sym() != RBRACE) {
-						// error();
-					}
-					else {
-						grammar::OutputToken(token);
-						token = grammar::GetToken();
-					}
-				}
-			}
-		}
-	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<情况语句>" << endl;
-	}
+	ExpectedOrError(SWITCHTK);
+	ExpectedOrError(LPARENT);
+	ExprType expr_type = grammar::expr();
+	ExpectedOrError(RPARENT);
+	ExpectedOrError(LBRACE);
+	grammar::case_tlb(expr_type);
+	grammar::default_statement();
+	ExpectedOrError(RBRACE);
+	grammar::OutputGrammarElementName("<情况语句>");
 }
 
 // <情况表>::=<情况子语句>{<情况子语句>}
-void grammar::case_tlb() {
-	grammar::case_substatement();
+void grammar::case_tlb(ExprType expr_type) {
+	grammar::case_substatement(expr_type);
 	while (token.get_token_sym() == CASETK) {
-		grammar::case_substatement();
+		grammar::case_substatement(expr_type);
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<情况表>" << endl;
-	}
+	grammar::OutputGrammarElementName("<情况表>");
 }
 
 // <情况子语句>::=case <常量>: <语句>
-void grammar::case_substatement() {
-	if (token.get_token_sym() != CASETK) {
-		// error();
-	}
-	else {
-		grammar::OutputToken(token);
-		token = grammar::GetToken();
-		grammar::const_sym();
-		if (token.get_token_sym() != COLON) {
-			// error();
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-			grammar::statement();
-		}
-	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<情况子语句>" << endl;
-	}
+void grammar::case_substatement(ExprType expr_type) {
+	ExpectedOrError(CASETK);
+	grammar::const_sym(expr_type);
+	ExpectedOrError(COLON);
+	grammar::statement();
+	grammar::OutputGrammarElementName("<情况子语句>");
 }
 
 // <缺省>::=default: <语句>
 void grammar::default_statement() {
 	if (token.get_token_sym() != DEFAULTTK) {
-		// error();
+		// 如果缺少缺省语句，报错后直接退出，因为后面一定是'}'
+		error::OutputError(token.get_line(), DefaultMiss);
 	}
 	else {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
-		if (token.get_token_sym() != COLON) {
-			// error();
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-			grammar::statement();
-		}
+		ExpectedOrError(COLON);
+		grammar::statement();
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<缺省>" << endl;
-	}
+	grammar::OutputGrammarElementName("<缺省>");
 }
 
 // <返回语句>::=return['('<表达式>')']
 void grammar::ret_statement() {
-	if (token.get_token_sym() != RETURNTK) {
-		// error();
+	ExpectedOrError(RETURNTK);
+	if (return_state == InIntRetFuncNoReturn) {
+		return_state = InIntRetFuncWithReturn;
 	}
-	else {
-		grammar::OutputToken(token);
-		token = grammar::GetToken();
-		if (token.get_token_sym() == LPARENT) {
+	else if (return_state == InCharRetFuncNoReturn) {
+		return_state = InCharRetFuncWithReturn;
+	}
+	if (token.get_token_sym() == LPARENT) {
+		if (return_state == InNoRetFunc) {
+			// 无返回值的函数有形如return(表达式);或return();的语句
+			error::OutputError(token.get_line(), NoRetFuncReturn);
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			grammar::expr();
-			if (token.get_token_sym() != RPARENT) {
-				// error();
-			}
-			else {
+			while (token.get_token_sym() != SEMICN) {
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
 			}
+		} 
+		else {
+			grammar::OutputToken(token);
+			token = grammar::GetToken();
+			if (token.get_token_sym() == RPARENT && return_state >= 1) {
+				// 有返回值的函数有形如return();的语句
+				error::OutputError(token.get_line(), RetFuncMissReturn);
+			} 
+			else {
+				ExprType expr_type = grammar::expr();
+				// cout << expr_type << endl;
+				if ((return_state == InIntRetFuncWithReturn && expr_type != IntExpr) ||
+					(return_state == InCharRetFuncWithReturn && expr_type != CharExpr)) {
+					// 有返回值的函数的return语句中表达式类型与返回值类型不一致
+					error::OutputError(token.get_line(), RetFuncMissReturn);
+				}
+			}
+			ExpectedOrError(RPARENT);
 		}
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<返回语句>" << endl;
+	else if (token.get_token_sym() == SEMICN && (return_state == InIntRetFuncNoReturn || 
+		return_state == InCharRetFuncNoReturn || return_state == InIntRetFuncWithReturn || 
+		return_state == InCharRetFuncWithReturn)) {
+		// 有返回值的函数有形如return;的语句
+		error::OutputError(token.get_line(), RetFuncMissReturn);
 	}
+	grammar::OutputGrammarElementName("<返回语句>");
 }
 
 // <表达式>::=[+|-]<项>{<加法运算符><项>}
-void grammar::expr() {
+ExprType grammar::expr() {
+	ExprType expr_type = VoidExpr;
 	if (token.get_token_sym() == PLUS || token.get_token_sym() == MINU) {
+		expr_type = IntExpr;
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 	}
-	grammar::term();
+	ExprType term_type = grammar::term();
+	if (expr_type == VoidExpr) {
+		expr_type = term_type;
+	}
 	while (token.get_token_sym() == PLUS || token.get_token_sym() == MINU) {
+		expr_type = IntExpr;
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
+		// 已经确认是整型表达式
 		grammar::term();
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<表达式>" << endl;
-	}
+	grammar::OutputGrammarElementName("<表达式>");
+	return expr_type;
 }
 
 // <项>::=<因子>{<乘法运算符><因子>}
-void grammar::term() {
-	grammar::factor();
+ExprType grammar::term() {
+	ExprType term_type = grammar::factor();
 	while (token.get_token_sym() == MULT || token.get_token_sym() == DIV) {
+		term_type = IntExpr;
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		grammar::factor();
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<项>" << endl;
-	}
+	grammar::OutputGrammarElementName("<项>");
+	return term_type;
 }
 
 /*
@@ -1625,35 +1334,46 @@ void grammar::term() {
 		| <字符>
 		| <有返回值函数调用语句>
 */
-void grammar::factor() {
-	if (grammar::is_func_call_with_ret()) {
+ExprType grammar::factor() {
+	ExprType factor_type = IntExpr;
+	if (grammar::is_func_call()) {
+		/*
+		因为不会出现无返回值调用语句，
+		只要出现标识符加'('的情况就进入有返回值函数调用语句,
+		如果发现这个标识符没有被定义，就在<有返回值函数调用语句>中报错，并且直接跳出跳读至';'；
+		*/
+		string func_name = token.get_token_str();
+		if (symbol_table::IsNameDefined(func_name) &&
+			symbol_table::GetSymbolLatestType(func_name) == CharFuncSym) {
+			factor_type = CharExpr;
+		}
 		grammar::func_call_with_ret();
 	}
 	else if (token.get_token_sym() == IDENFR) {
+		if (!symbol_table::IsNameDefined(token.get_token_str())) {
+			error::OutputError(token.get_line(), NameNotDefine);
+		}
+		if (symbol_table::GetSymbolLatestType(token.get_token_str()) == CharVarSym ||
+			symbol_table::GetSymbolLatestType(token.get_token_str()) == CharConSym ||
+			symbol_table::GetSymbolLatestType(token.get_token_str()) == CharArrSym) {
+			factor_type = CharExpr;
+		}
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		if (token.get_token_sym() == LBRACK) {
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			grammar::expr();
-			if (token.get_token_sym() != RBRACK) {
-				// error();
+			if (grammar::expr() != IntExpr) {
+				error::OutputError(token.get_line(), ArrIndexNotInt);
 			}
-			else {
+			ExpectedOrError(RBRACK);
+			if (token.get_token_sym() == LBRACK) {
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
-				if (token.get_token_sym() == LBRACK) {
-					grammar::OutputToken(token);
-					token = grammar::GetToken();
-					grammar::expr();
-					if (token.get_token_sym() != RBRACK) {
-						// error();
-					}
-					else {
-						grammar::OutputToken(token);
-						token = grammar::GetToken();
-					}
+				if (grammar::expr() != IntExpr) {
+					error::OutputError(token.get_line(), ArrIndexNotInt);
 				}
+				ExpectedOrError(RBRACK);
 			}
 		}
 	}
@@ -1661,57 +1381,44 @@ void grammar::factor() {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		grammar::expr();
-		if (token.get_token_sym() != RPARENT) {
-			// error();
-		}
-		else {
-			grammar::OutputToken(token);
-			token = grammar::GetToken();
-		}
+		ExpectedOrError(RPARENT);
 	}
 	else if (token.get_token_sym() == PLUS || token.get_token_sym() == MINU ||
 		token.get_token_sym() == INTCON) {
 		grammar::integer();
 	}
 	else if (token.get_token_sym() == CHARCON) {
+		factor_type = CharExpr;
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 	}
 	else {
-		// 有可能出现无返回值函数调用语句
 		// error();
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<因子>" << endl;
-	}
+	grammar::OutputGrammarElementName("<因子>");
+	return factor_type;
 }
 
 // <字符串>::="{十进制编码为32,33,35-126的ASCII字符}"
 void grammar::string_sym() {
-	if (token.get_token_sym() != STRCON) {
-		// error();
-	}
-	else {
-		grammar::OutputToken(token);
-		token = grammar::GetToken();
-	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<字符串>" << endl;
-	}
+	ExpectedOrError(STRCON);
+	grammar::OutputGrammarElementName("<字符串>");
 }
 
 // <常量>::=<整数> | <字符>
-void grammar::const_sym() {
+void grammar::const_sym(ExprType expr_type) {
+	if ((expr_type == CharExpr && token.get_token_sym() != CHARCON) || 
+		(expr_type == IntExpr && token.get_token_sym() == CHARCON)) {
+		error::OutputError(token.get_line(), VarTypeNotMatch);
+	}
 	if (token.get_token_sym() == CHARCON) {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 	}
 	else {
-		integer();
+		grammar::integer();
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<常量>" << endl;
-	}
+	grammar::OutputGrammarElementName("<常量>");
 }
 
 // <整数>::=[+|-]<无符号整数>
@@ -1721,21 +1428,20 @@ void grammar::integer() {
 		token = grammar::GetToken();
 	}
 	grammar::unsigned_integer();
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<整数>" << endl;
-	}
+	grammar::OutputGrammarElementName("<整数>");
 }
 
 // <无符号整数>::= <数字>{<数字>}
-void grammar::unsigned_integer() {
+int grammar::unsigned_integer() {
+	int num = -1;
 	if (token.get_token_sym() != INTCON) {
 		// error();
 	}
 	else {
+		num = stoi(token.get_token_str());
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 	}
-	if (GRAMMAR_OUTPUT) {
-		output_file << "<无符号整数>" << endl;
-	}
+	grammar::OutputGrammarElementName("<无符号整数>");
+	return num;
 }

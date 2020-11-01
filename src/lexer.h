@@ -47,7 +47,7 @@ constexpr auto LBRACE = 37;		// {
 constexpr auto RBRACE = 38;		// }
 
 // Àà±ðÂë±í
-const std::vector<std::string> symbol_table = {
+const std::vector<std::string> token_table = {
 	"IDENFR",
 	"INTCON",
 	"CHARCON",

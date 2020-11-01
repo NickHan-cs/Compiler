@@ -3,6 +3,7 @@
 
 const bool ERROR_TYPE_OUTPUT = true;
 const bool ERROR_DESCRIPTION_OUTPUT = false;
+const bool ERROR_ANALYSIS_DEBUG = false;
 
 enum ErrorType {
 	InvalidSymbol,				// a 非法符号或不符合词法
@@ -20,11 +21,12 @@ enum ErrorType {
 	RbrackMiss,					// m 应为右中括号']'
 	ArrInitNotMatch,			// n 数组初始化个数不匹配
 	VarTypeNotMatch,			// o <常量>类型不一致
-	MissDefault,				// p 缺少缺省语句
+	DefaultMiss,				// p 缺少缺省语句
 	OtherError,
 };
 
 namespace error {
 	std::string GetErrorTypeNum(ErrorType error_type);
+	// 打印错误信息，分为ERROR_TYPE_OUTPUT和ERROR_DESCRIPTION_ERROR两种
 	void OutputError(int error_line, ErrorType error_type);
 }
