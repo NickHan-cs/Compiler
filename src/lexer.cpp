@@ -107,6 +107,9 @@ Token lexer::GetNewToken() {
 				if (lexer::IsCharOfString(ch)) {
 					// 非法字符不加入字符串中
 					token_str += ch;
+					if (ch == '\\') {
+						token_str += ch;
+					}
 				}
 				else {
 					// 因为不会出现恶意换行的情况，所以字符串一定在同一行，错误所在行即前双引号所在行

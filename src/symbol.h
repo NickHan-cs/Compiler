@@ -116,6 +116,14 @@ namespace symbol_table {
 	*/
 	bool IsWithRetFunc(std::string func_name);
 
+	std::shared_ptr<Symbol> GetSymbolLatest(std::string symbol_name);
+
+	/*
+	得到最后一次插入的名为symbol_name的标识符的symbol_level。
+	如果name2index_map中不存在symbol_name的键，返回-1。
+	*/
+	int GetSymbolLatestLevel(std::string symbol_name);
+
 	/*
 	得到最后一次插入的名为symbol_name的标识符的symbol_type。
 	如果name2index_map中不存在symbol_name的键，返回OtherTypeSym。

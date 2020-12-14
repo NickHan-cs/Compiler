@@ -161,6 +161,30 @@ bool symbol_table::IsWithRetFunc(string func_name) {
 		symbol_table::GetSymbolLatestType(func_name) == CharFuncSym;
 }
 
+int symbol_table::GetSymbolLatestLevel(string symbol_name) {
+	transform(symbol_name.begin(), symbol_name.end(), symbol_name.begin(), ::tolower);
+	if (name2index_map.find(symbol_name) == name2index_map.end()) {
+		return -1;
+	}
+	shared_ptr<vector<int>> index_vector_ptr = name2index_map.at(symbol_name);
+	if (index_vector_ptr->empty()) {
+		return OtherTypeSym;
+	}
+	return symbol_ptr_vector.at(index_vector_ptr->back())->get_symbol_level();
+}
+
+shared_ptr<Symbol> symbol_table::GetSymbolLatest(string symbol_name) {
+	transform(symbol_name.begin(), symbol_name.end(), symbol_name.begin(), ::tolower);
+	if (name2index_map.find(symbol_name) == name2index_map.end()) {
+		return nullptr;
+	}
+	shared_ptr<vector<int>> index_vector_ptr = name2index_map.at(symbol_name);
+	if (index_vector_ptr->empty()) {
+		return nullptr;
+	}
+	return symbol_ptr_vector.at(index_vector_ptr->back());
+}
+
 SymbolType symbol_table::GetSymbolLatestType(string symbol_name) {
 	transform(symbol_name.begin(), symbol_name.end(), symbol_name.begin(), ::tolower);
 	if (name2index_map.find(symbol_name) == name2index_map.end()) {

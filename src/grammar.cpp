@@ -6,17 +6,23 @@
 #include "grammar.h"
 #include "symbol.h"
 #include "error.h"
+#include "ir.h"
 using namespace std;
 
 extern ofstream output_file;
 extern Token last_token;
 extern Token token;
+static int label_idx = 0;;
 
 stack<Token> token_stack;
 stack<Token> temp_token_stack;
 
 static int subprogram_level = -1;	// 分程序层次
 stack<int> subprogram_level_stack;	// 分程序层次栈
+
+const StringOperand enter_string_opreand_ptr = StringOperand("enter_str", "\\n");
+const ImmeOperand zero_imme_operand_ptr = ImmeOperand(0);
+const SymbolOperand v0_symbol_operand_ptr = SymbolOperand("$v0");
 
 enum ReturnState {
 	InNoRetFunc,				// 在无返回值函数定义
@@ -28,6 +34,11 @@ enum ReturnState {
 };
 
 ReturnState return_state = NotInFunc;
+
+string ProdLabelName() {
+	label_idx += 1;
+	return "Label_" + to_string(label_idx);
+}
 
 Token grammar::GetToken() {
 	// 保存前一个token，这里的token是全局变量
@@ -236,19 +247,18 @@ void grammar::program() {
 // <有返回值函数定义>::=<声明头部>'('<参数表>')''{'<复合语句>'}'
 void grammar::func_def_with_ret() {
 	grammar::declaration_head();	// 得到函数名
-
 	grammar::GetIntoNewLevel();
 	ExpectedOrError(LPARENT);
 	grammar::para_tlb();
 	ExpectedOrError(RPARENT);
 	ExpectedOrError(LBRACE);
 	grammar::compound_statements();
+	// 没有出现return
 	if (return_state == InIntRetFuncNoReturn || return_state == InCharRetFuncNoReturn) {
 		error::OutputError(token.get_line(), RetFuncMissReturn);
 	}
 	ExpectedOrError(RBRACE);
 	grammar::ExitCurLevel();
-
 	return_state = NotInFunc;
 	grammar::OutputGrammarElementName("<有返回值函数定义>");
 }
@@ -273,15 +283,17 @@ void grammar::declaration_head() {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 	}
-
 	if (token.get_token_sym() != IDENFR) {
 		// 声明头部中没有指定函数名
 		// error();
 	}
 	else {
-		if (!symbol_table::AddFuncSymbol(token.get_token_str(), func_ret_type, subprogram_level_stack.top())) {
+		string func_name = token.get_token_str();
+		if (!symbol_table::AddFuncSymbol(func_name, func_ret_type, subprogram_level_stack.top())) {
 			error::OutputError(token.get_line(), NameRedefine);
 		}
+		Operand* func_label_operand_ptr = new LabelOperand("_" + func_name + "_Label");
+		ir::AddQuaternionBack(Quaternion(OperatorType::LABEL, func_label_operand_ptr));
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 	}
@@ -297,9 +309,12 @@ void grammar::func_def_no_ret() {
 		// error();
 	}
 	else {
-		if (!symbol_table::AddFuncSymbol(token.get_token_str(), VoidFuncSym, subprogram_level_stack.top())) {
+		string func_name = token.get_token_str();
+		if (!symbol_table::AddFuncSymbol(func_name, VoidFuncSym, subprogram_level_stack.top())) {
 			error::OutputError(token.get_line(), NameRedefine);
 		}
+		Operand* func_label_operand_ptr = new LabelOperand("_" + func_name + "_Label");
+		ir::AddQuaternionBack(Quaternion(OperatorType::LABEL, func_label_operand_ptr));
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 	}
@@ -311,7 +326,6 @@ void grammar::func_def_no_ret() {
 	grammar::compound_statements();
 	ExpectedOrError(RBRACE);
 	grammar::ExitCurLevel();
-
 	return_state = NotInFunc;
 	grammar::OutputGrammarElementName("<无返回值函数定义>");
 }
@@ -323,12 +337,8 @@ void grammar::para_tlb() {
 	if (symbol_table::IsFuncSymbol(symbol_ptr->get_symbol_type())) {
 		func_symbol_ptr = dynamic_pointer_cast<FuncSymbol>(symbol_ptr);
 	}
-
 	if (token.get_token_sym() == INTTK || token.get_token_sym() == CHARTK) {
-		SymbolType var_symbol_type = IntVarSym;
-		if (token.get_token_sym() == CHARTK) {
-			var_symbol_type = CharVarSym;
-		}
+		SymbolType var_symbol_type = token.get_token_sym() == CHARTK ? CharVarSym : IntVarSym;
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		if (token.get_token_sym() != IDENFR) {
@@ -341,6 +351,7 @@ void grammar::para_tlb() {
 			} 
 			else if (func_symbol_ptr) {
 				shared_ptr<Symbol> arg_symbol_ptr = symbol_table::GetSymbolPtrVectorBack();
+				ir::AddQuaternionBack(Quaternion(OperatorType::PARAM, ir::GetSymbolOperandPtr(arg_symbol_ptr)));
 				assert(symbol_table::IsVarSymbol(arg_symbol_ptr->get_symbol_type()));
 				shared_ptr<VarSymbol> var_symbol_ptr = dynamic_pointer_cast<VarSymbol>(arg_symbol_ptr);
 				func_symbol_ptr->add_func_symbol_args_ptr(var_symbol_ptr);
@@ -356,10 +367,7 @@ void grammar::para_tlb() {
 				// error();
 			}
 			else {
-				var_symbol_type = IntVarSym;
-				if (token.get_token_sym() == CHARTK) {
-					var_symbol_type = CharVarSym;
-				}
+				var_symbol_type = token.get_token_sym() == CHARTK ? CharVarSym : IntVarSym;
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
 				if (token.get_token_sym() != IDENFR) {
@@ -372,6 +380,7 @@ void grammar::para_tlb() {
 					}
 					else if (func_symbol_ptr) {
 						shared_ptr<Symbol> arg_symbol_ptr = symbol_table::GetSymbolPtrVectorBack();
+						ir::AddQuaternionBack(Quaternion(OperatorType::PARAM, ir::GetSymbolOperandPtr(arg_symbol_ptr)));
 						assert(symbol_table::IsVarSymbol(arg_symbol_ptr->get_symbol_type()));
 						shared_ptr<VarSymbol> var_symbol_ptr = dynamic_pointer_cast<VarSymbol>(arg_symbol_ptr);
 						func_symbol_ptr->add_func_symbol_args_ptr(var_symbol_ptr);
@@ -387,17 +396,17 @@ void grammar::para_tlb() {
 
 // <主函数>::=void main '(' ')' '{' <复合语句> '}'
 void grammar::main_func() {
+	Operand* main_label_operand_ptr = new LabelOperand("_main_Label");
+	ir::AddQuaternionBack(Quaternion(LABEL, main_label_operand_ptr));
 	return_state = InNoRetFunc;
 	ExpectedOrError(VOIDTK);
 	ExpectedOrError(MAINTK);
 	ExpectedOrError(LPARENT);
 	ExpectedOrError(RPARENT);
 	ExpectedOrError(LBRACE);
-
 	grammar::GetIntoNewLevel();
 	grammar::compound_statements();
 	grammar::ExitCurLevel();
-
 	ExpectedOrError(RBRACE);
 	grammar::OutputGrammarElementName("<主函数>");
 }
@@ -441,69 +450,123 @@ void grammar::const_def() {
 	if (token.get_token_sym() == INTTK) {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
+		string const_name = token.get_token_str();
+
 		if (token.get_token_sym() != IDENFR) {
 			// int后没有标识符
 			// error();
 		}
 		else {
-			if (!symbol_table::AddVarSymbol(token.get_token_str(), IntConSym, subprogram_level_stack.top())) {
+			if (!symbol_table::AddVarSymbol(const_name, IntConSym, subprogram_level_stack.top())) {
 				error::OutputError(token.get_line(), NameRedefine);
 			}
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 		}
+
 		ExpectedOrError(ASSIGN);
-		grammar::integer();
+
+		int const_value = grammar::integer();
+		shared_ptr<Symbol> symbol_ptr = symbol_table::GetSymbolLatest(const_name);
+		if (symbol_ptr->get_symbol_type() == IntConSym) {
+			shared_ptr<VarSymbol> const_symbol_ptr = dynamic_pointer_cast<VarSymbol>(symbol_ptr);
+			const_symbol_ptr->set_var_symbol_value(const_value);
+		}
+
 		while (token.get_token_sym() == COMMA) {
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
+			const_name = token.get_token_str();
+			
 			if (token.get_token_sym() != IDENFR) {
 				// ,后面没有标识符
 				// error();
 			}
 			else {
-				if (!symbol_table::AddVarSymbol(token.get_token_str(), IntConSym, subprogram_level_stack.top())) {
+				if (!symbol_table::AddVarSymbol(const_name, IntConSym, subprogram_level_stack.top())) {
 					error::OutputError(token.get_line(), NameRedefine);
 				}
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
 			}
+			
 			ExpectedOrError(ASSIGN);
-			grammar::integer();
+			
+			const_value = grammar::integer();
+			shared_ptr<Symbol> symbol_ptr = symbol_table::GetSymbolLatest(const_name);
+			if (symbol_ptr->get_symbol_type() == IntConSym) {
+				shared_ptr<VarSymbol> const_symbol_ptr = dynamic_pointer_cast<VarSymbol>(symbol_ptr);
+				const_symbol_ptr->set_var_symbol_value(const_value);
+			}
 		}
 	}
 	else if (token.get_token_sym() == CHARTK) {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
+		string const_name = token.get_token_str();
+		
 		if (token.get_token_sym() != IDENFR) {
 			// ,后面没有标识符
 			// error();
 		}
 		else {
-			if (!symbol_table::AddVarSymbol(token.get_token_str(), CharConSym, subprogram_level_stack.top())) {
+			if (!symbol_table::AddVarSymbol(const_name, CharConSym, subprogram_level_stack.top())) {
 				error::OutputError(token.get_line(), NameRedefine);
 			}
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 		}
+		
 		ExpectedOrError(ASSIGN);
-		ExpectedOrError(CHARCON);
+		
+		int const_value = 0;
+		if (token.get_token_sym() != CHARCON) {
+			// error();
+		}
+		else {
+			const_value = token.get_token_str()[0];
+			shared_ptr<Symbol> symbol_ptr = symbol_table::GetSymbolLatest(const_name);
+			if (symbol_ptr->get_symbol_type() == CharConSym) {
+				shared_ptr<VarSymbol> const_symbol_ptr = dynamic_pointer_cast<VarSymbol>(symbol_ptr);
+				const_symbol_ptr->set_var_symbol_value(const_value);
+			}
+			
+			grammar::OutputToken(token);
+			token = grammar::GetToken();
+		}
 		while (token.get_token_sym() == COMMA) {
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
+			const_name = token.get_token_str();
+			
 			if (token.get_token_sym() != IDENFR) {
 				// ,后面没有标识符
 				// error();
 			}
 			else {
-				if (!symbol_table::AddVarSymbol(token.get_token_str(), CharConSym, subprogram_level_stack.top())) {
+				if (!symbol_table::AddVarSymbol(const_name, CharConSym, subprogram_level_stack.top())) {
 					error::OutputError(token.get_line(), NameRedefine);
 				}
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
 			}
+			
 			ExpectedOrError(ASSIGN);
-			ExpectedOrError(CHARCON);
+			
+			const_value = 0;
+			if (token.get_token_sym() != CHARCON) {
+				// error();
+			}
+			else {
+				const_value = token.get_token_str()[0];
+				shared_ptr<Symbol> symbol_ptr = symbol_table::GetSymbolLatest(const_name);
+				if (symbol_ptr->get_symbol_type() == CharConSym) {
+					shared_ptr<VarSymbol> const_symbol_ptr = dynamic_pointer_cast<VarSymbol>(symbol_ptr);
+					const_symbol_ptr->set_var_symbol_value(const_value);
+				}
+				grammar::OutputToken(token);
+				token = grammar::GetToken();
+			}
 		}
 	}
 	else {
@@ -546,13 +609,11 @@ void grammar::var_def_no_init_while(int symbol_type_sym) {
 		else {
 			string symbol_name = token.get_token_str();
 			int symbol_line = token.get_line();
+			SymbolType symbol_type = symbol_type_sym == CHARTK ? CharVarSym : IntVarSym;
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 			if (token.get_token_sym() == LBRACK) {
-				SymbolType symbol_type = IntArrSym;
-				if (symbol_type_sym == CHARTK) {
-					symbol_type = CharArrSym;
-				}
+				symbol_type = symbol_type_sym == CHARTK ? CharArrSym : IntArrSym;
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
 				int arr_symbol_dim_1 = grammar::unsigned_integer();
@@ -573,17 +634,21 @@ void grammar::var_def_no_init_while(int symbol_type_sym) {
 				if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, arr_symbol_dim_2)) {
 					error::OutputError(symbol_line, NameRedefine);
 				}
+				Operand* dim_1_operand_ptr = new ImmeOperand(arr_symbol_dim_1);
+				if (arr_symbol_dim_2 == -1) {
+					ir::AddQuaternionBack(Quaternion(OperatorType::ARR_VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name)), dim_1_operand_ptr));
+				}
+				else {
+					Operand* dim_2_operand_ptr = new ImmeOperand(arr_symbol_dim_2);
+					ir::AddQuaternionBack(Quaternion(OperatorType::ARR_VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name)), dim_1_operand_ptr, dim_2_operand_ptr));
+				}
 			}
 			else {
-				SymbolType symbol_type = IntVarSym;
-				if (symbol_type_sym == CHARTK) {
-					symbol_type = CharVarSym;
-				}
 				if (!symbol_table::AddVarSymbol(symbol_name, symbol_type, subprogram_level_stack.top())) {
-					// 名字重定义
 					// 已经读到标识符的下一个token，所以last_token才是标识符
 					error::OutputError(last_token.get_line(), NameRedefine);
 				}
+				ir::AddQuaternionBack(Quaternion(VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name))));
 			}
 		}
 	}
@@ -603,70 +668,92 @@ void grammar::var_def_no_init() {
 		// 变量定义初始化开头不是int或char，似乎不会出现这种情况，因为都是经过预读的
 		// error();
 	}
-	else {	// <类型标识符>
+	else {	
+		// <类型标识符>
 		int symbol_type_sym = token.get_token_sym();
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
+
 		if (token.get_token_sym() != IDENFR) {
 			// int 或 char没有标识符，应该跳读至,或;
 			// error();
 		}
-		else {	// <类型标识符> <标识符>
+		else {	
+			// <类型标识符> <标识符>
 			string symbol_name = token.get_token_str();
 			int symbol_line = token.get_line();
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			if (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>,
+
+			if (token.get_token_sym() == COMMA) {
+				// <类型标识符> <标识符>,
 				// 读到','说明一个变量定义无初始化结束了，应该加入到符号表中
-				SymbolType symbol_type = IntVarSym;
-				if (symbol_type_sym == CHARTK) {
-					symbol_type = CharVarSym;
-				}
+				SymbolType symbol_type = symbol_type_sym == CHARTK ? CharVarSym : IntVarSym;
 				if (!symbol_table::AddVarSymbol(symbol_name, symbol_type, subprogram_level_stack.top())) {
-					// 名字重定义
 					error::OutputError(symbol_line, NameRedefine);
 				}
+				ir::AddQuaternionBack(Quaternion(VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name))));
+				
 				grammar::var_def_no_init_while(symbol_type_sym);
 			}
-			else if (token.get_token_sym() == LBRACK) {	//<类型标识符> <标识符>[
-				SymbolType symbol_type = IntArrSym;
-				if (symbol_type_sym == CHARTK) {
-					symbol_type = CharArrSym;
-				}
+			else if (token.get_token_sym() == LBRACK) {	
+				//<类型标识符> <标识符>[
+				SymbolType symbol_type = symbol_type_sym == CHARTK ? CharArrSym : IntArrSym;
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
+
 				int arr_symbol_dim_1 = grammar::unsigned_integer();
-				ExpectedOrError(RBRACK);	// <类型标识符> <标识符>[<无符号整数>]
-				if (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>[<无符号整数>],
+
+				ExpectedOrError(RBRACK);	
+
+				// <类型标识符> <标识符>[<无符号整数>]
+				if (token.get_token_sym() == COMMA) {	
+					// <类型标识符> <标识符>[<无符号整数>],
 					if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, -1)) {
 						error::OutputError(symbol_line, NameRedefine);
 					}
+					Operand* dim_1_operand_ptr = new ImmeOperand(arr_symbol_dim_1);
+					ir::AddQuaternionBack(Quaternion(OperatorType::ARR_VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name)), dim_1_operand_ptr));
+					
 					grammar::var_def_no_init_while(symbol_type_sym);
 				}
-				else if (token.get_token_sym() == LBRACK) {	// <类型标识符> <标识符>[<无符号整数>][
+				else if (token.get_token_sym() == LBRACK) {	
+					// <类型标识符> <标识符>[<无符号整数>][
 					grammar::OutputToken(token);
 					token = grammar::GetToken();
 					int arr_symbol_dim_2 = grammar::unsigned_integer();
-					ExpectedOrError(RBRACK);	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]
+
+					ExpectedOrError(RBRACK);
+
+					// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]
 					if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, arr_symbol_dim_2)) {
 						error::OutputError(symbol_line, NameRedefine);
 					}
-					if (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>],
+					Operand* dim_1_operand_ptr = new ImmeOperand(arr_symbol_dim_1);
+					Operand* dim_2_operand_ptr = new ImmeOperand(arr_symbol_dim_2);
+					ir::AddQuaternionBack(Quaternion(OperatorType::ARR_VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name)), dim_1_operand_ptr, dim_2_operand_ptr));
+					
+					if (token.get_token_sym() == COMMA) {	
+						// <类型标识符> <标识符>[<无符号整数>][<无符号整数>],
 						grammar::var_def_no_init_while(symbol_type_sym);
 					}
 				}
-				else if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, -1)){
-					error::OutputError(symbol_line, NameRedefine);
+				else {
+					// <类型标识符> <标识符>[<无符号整数>];
+					if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, -1)) {
+						error::OutputError(symbol_line, NameRedefine);
+					}
+					Operand* dim_1_operand_ptr = new ImmeOperand(arr_symbol_dim_1);
+					ir::AddQuaternionBack(Quaternion(OperatorType::ARR_VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name)), dim_1_operand_ptr));
 				}
 			}
 			else {
-				SymbolType symbol_type = IntVarSym;
-				if (symbol_type_sym == CHARTK) {
-					symbol_type = CharVarSym;
-				}
+				// <类型标识符> <标识符>;
+				SymbolType symbol_type = symbol_type_sym == CHARTK ? CharVarSym : IntVarSym;
 				if (!symbol_table::AddVarSymbol(symbol_name, symbol_type, subprogram_level_stack.top())) {
 					error::OutputError(symbol_line, NameRedefine);
 				}
+				ir::AddQuaternionBack(Quaternion(VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name))));
 			}
 		}
 	}
@@ -682,94 +769,112 @@ void grammar::var_def_with_init() {
 	if (token.get_token_sym() != INTTK && token.get_token_sym() != CHARTK) {
 		// 该情况不会出现，因为进入<变量定义及初始化>需要预读
 	}
-	else {	// <类型标识符>
+	else {	
+		// <类型标识符>
 		int symbol_type_sym = token.get_token_sym();
-		ExprType expr_type = IntExpr;
-		if (symbol_type_sym == CHARTK) {
-			expr_type = CharExpr;
-		}
+		ExprType expr_type = symbol_type_sym == CHARTK ? CharExpr : IntExpr;
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		if (token.get_token_sym() != IDENFR) {
 			// 该情况不会出现，因为进入<变量定义及初始化>需要预读
 		}
-		else {	// <类型标识符> <标识符>
+		else {	
+			// <类型标识符> <标识符>
 			string symbol_name = token.get_token_str();
 			int symbol_line = token.get_line();
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			if (token.get_token_sym() == ASSIGN) {	// <类型标识符> <标识符>=
+			if (token.get_token_sym() == ASSIGN) {	
+				// <类型标识符> <标识符>=
 				// 即使在'='后面出现了问题，该变量还是被加入了符号表
-				
-				SymbolType symbol_type = IntVarSym;
-				if (symbol_type_sym == CHARTK) {
-					symbol_type = CharVarSym;
-				}
-
+				SymbolType symbol_type = symbol_type_sym == CHARTK ? CharVarSym : IntVarSym;
 				if (!symbol_table::AddVarSymbol(symbol_name, symbol_type, subprogram_level_stack.top())) {
 					error::OutputError(symbol_line, NameRedefine);
 				}
+				Operand* symbol_operand_ptr = ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name));
+				ir::AddQuaternionBack(Quaternion(OperatorType::VAR, symbol_operand_ptr));
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
-				grammar::const_sym(expr_type);	// <类型标识符> <标识符>=<常量>
+				int instant_value = grammar::const_sym(expr_type);	// <类型标识符> <标识符>=<常量>
+				Operand* imme_operand_ptr = new ImmeOperand(instant_value);
+				ir::AddQuaternionBack(Quaternion(OperatorType::LOAD_IMM, symbol_operand_ptr, imme_operand_ptr));
 			}
-			else if (token.get_token_sym() == LBRACK) {	// <类型标识符> <标识符>'['
-				
-				SymbolType symbol_type = IntArrSym;
-				if (symbol_type_sym == CHARTK) {
-					symbol_type = CharArrSym;
-				}
+			else if (token.get_token_sym() == LBRACK) {	
+				// <类型标识符> <标识符>'['
+				SymbolType symbol_type = symbol_type_sym == CHARTK ? CharArrSym : IntArrSym;
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
 				int arr_symbol_dim_1 = grammar::unsigned_integer();
-				int arr_symbol_dim_2 = -1;
+				Operand* dim_1_operand_ptr = new ImmeOperand(arr_symbol_dim_1);
 				// 此处也可能有报错先后问题
 				ExpectedOrError(RBRACK);	// <类型标识符> <标识符>'['<无符号整数>']'
-				if (token.get_token_sym() == ASSIGN) {	// <类型标识符> <标识符>'['<无符号整数>']'=
+				if (token.get_token_sym() == ASSIGN) {	
+					// <类型标识符> <标识符>'['<无符号整数>']'=
 					if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, -1)) {
 						error::OutputError(symbol_line, NameRedefine);
 					}
+					Operand* symbol_operand_ptr = ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name));
+					ir::AddQuaternionBack(Quaternion(OperatorType::ARR_VAR, symbol_operand_ptr, dim_1_operand_ptr));
 					grammar::OutputToken(token);
 					token = grammar::GetToken();
 					ExpectedOrError(LBRACE);	// <类型标识符> <标识符>'['<无符号整数>']'='{'
-					int const_sym_num_1 = 0;
-					grammar::const_sym(expr_type);	// <类型标识符> <标识符>'['<无符号整数>']'='{'<常量>
-					const_sym_num_1 += 1;
-					while (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>'['<无符号整数>']'='{'<常量>,{<常量>}
+					int instant_num_1 = 0;
+					Operand* instant_num_operand_ptr = new ImmeOperand(instant_num_1);
+					int instant_value = grammar::const_sym(expr_type);	// <类型标识符> <标识符>'['<无符号整数>']'='{'<常量>
+					Operand* imme_operand_ptr = new ImmeOperand(instant_value);
+					ir::AddQuaternionBack(Quaternion(OperatorType::ARR_INIT, imme_operand_ptr, symbol_operand_ptr, instant_num_operand_ptr));
+					instant_num_1 += 1;
+					while (token.get_token_sym() == COMMA) {	
+						// <类型标识符> <标识符>'['<无符号整数>']'='{'<常量>,{<常量>}
 						grammar::OutputToken(token);
 						token = grammar::GetToken();
-						grammar::const_sym(expr_type);
-						const_sym_num_1 += 1;
+						instant_value = grammar::const_sym(expr_type);
+						Operand* imme_operand_ptr = new ImmeOperand(instant_value);
+						Operand* instant_num_operand_ptr = new ImmeOperand(instant_num_1);
+						ir::AddQuaternionBack(Quaternion(OperatorType::ARR_INIT, imme_operand_ptr, symbol_operand_ptr, instant_num_operand_ptr));
+						instant_num_1 += 1;
 					}
-					if (const_sym_num_1 != arr_symbol_dim_1) {
+					if (instant_num_1 != arr_symbol_dim_1) {
 						error::OutputError(token.get_line(), ArrInitNotMatch);
 					}
 					ExpectedOrError(RBRACE);	// <类型标识符> <标识符>'['<无符号整数>']'='{'<常量>,{<常量>}'}'
 				}
-				else if (token.get_token_sym() == LBRACK) {	// <类型标识符> <标识符>'['<无符号整数>']''['
+				else if (token.get_token_sym() == LBRACK) {	
+					// <类型标识符> <标识符>'['<无符号整数>']''['
 					grammar::OutputToken(token);
 					token = grammar::GetToken();
-					arr_symbol_dim_2 = grammar::unsigned_integer();
+					int arr_symbol_dim_2 = grammar::unsigned_integer();
+					Operand* dim_2_operand_ptr = new ImmeOperand(arr_symbol_dim_2);
 					// 此处也可能有报错先后问题
 					ExpectedOrError(RBRACK);	// <类型标识符> <标识符>'['<无符号整数>']''['<无符号整数>']'
 					if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, arr_symbol_dim_2)) {
 						error::OutputError(symbol_line, NameRedefine);
 					}
+					Operand* symbol_operand_ptr = ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name));
+					ir::AddQuaternionBack(Quaternion(OperatorType::ARR_VAR, symbol_operand_ptr, dim_1_operand_ptr, dim_2_operand_ptr));
 					ExpectedOrError(ASSIGN);	// <类型标识符> <标识符>'['<无符号整数>']''['<无符号整数>']'=
 					ExpectedOrError(LBRACE);	// <类型标识符> <标识符>'['<无符号整数>']''['<无符号整数>']'='{'
-					int const_sym_num_1 = 0;
+					int instant_num_1 = 0;
 					ExpectedOrError(LBRACE);	// <类型标识符> <标识符>'['<无符号整数>']''['<无符号整数>']'='{''{'
-					const_sym_num_1 += 1;
-					int const_sym_num_2 = 0;
-					grammar::const_sym(expr_type);	// <类型标识符> <标识符>'['<无符号整数>']''['<无符号整数>']'='{''{'<常量>
-					const_sym_num_2 += 1;
+					instant_num_1 += 1;
+					int instant_num_2 = 0;
+					int array_idx = 0;
+					Operand* array_idx_operand_ptr = new ImmeOperand(array_idx);
+					int instant_value = grammar::const_sym(expr_type);	// <类型标识符> <标识符>'['<无符号整数>']''['<无符号整数>']'='{''{'<常量>
+					Operand* imme_operand_ptr = new ImmeOperand(instant_value);
+					ir::AddQuaternionBack(Quaternion(OperatorType::ARR_INIT, imme_operand_ptr, symbol_operand_ptr, array_idx_operand_ptr));
+					instant_num_2 += 1;
 					while (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>'['<无符号整数>']''['<无符号整数>']'='{''{'<常量>,{<常量>}
 						grammar::OutputToken(token);
 						token = grammar::GetToken();
-						grammar::const_sym(expr_type);
-						const_sym_num_2 += 1;
+						array_idx += 1;
+						Operand* array_idx_operand_ptr = new ImmeOperand(array_idx);
+						instant_value = grammar::const_sym(expr_type);
+						Operand* imme_operand_ptr = new ImmeOperand(instant_value);
+						ir::AddQuaternionBack(Quaternion(OperatorType::ARR_INIT, imme_operand_ptr, symbol_operand_ptr, array_idx_operand_ptr));
+						instant_num_2 += 1;
 					}
-					if (const_sym_num_2 != arr_symbol_dim_2) {
+					if (instant_num_2 != arr_symbol_dim_2) {
 						error::OutputError(token.get_line(), ArrInitNotMatch);
 					}
 					ExpectedOrError(RBRACE);	// <类型标识符> <标识符>'['<无符号整数>']''['<无符号整数>']'='{''{'<常量>,{<常量>}'}'
@@ -777,22 +882,30 @@ void grammar::var_def_with_init() {
 						grammar::OutputToken(token);
 						token = grammar::GetToken();
 						ExpectedOrError(LBRACE);	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {
-						const_sym_num_1 += 1;
-						const_sym_num_2 = 0;
-						grammar::const_sym(expr_type);	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4
-						const_sym_num_2 += 1;
+						instant_num_1 += 1;
+						instant_num_2 = 0;
+						array_idx += 1;
+						Operand* array_idx_operand_ptr = new ImmeOperand(array_idx);
+						instant_value = grammar::const_sym(expr_type);	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4
+						Operand* imme_operand_ptr = new ImmeOperand(instant_value);
+						ir::AddQuaternionBack(Quaternion(OperatorType::ARR_INIT, imme_operand_ptr, symbol_operand_ptr, array_idx_operand_ptr));
+						instant_num_2 += 1;
 						while (token.get_token_sym() == COMMA) {	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4,
 							grammar::OutputToken(token);
 							token = grammar::GetToken();
-							grammar::const_sym(expr_type);	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4, 5
-							const_sym_num_2 += 1;
+							array_idx += 1;
+							Operand* array_idx_operand_ptr = new ImmeOperand(array_idx);
+							instant_value = grammar::const_sym(expr_type);	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4, 5
+							Operand* imme_operand_ptr = new ImmeOperand(instant_value);
+							ir::AddQuaternionBack(Quaternion(OperatorType::ARR_INIT, imme_operand_ptr, symbol_operand_ptr, array_idx_operand_ptr));
+							instant_num_2 += 1;
 						}
-						if (const_sym_num_2 != arr_symbol_dim_2) {
+						if (instant_num_2 != arr_symbol_dim_2) {
 							error::OutputError(token.get_line(), ArrInitNotMatch);
 						}
 						ExpectedOrError(RBRACE);	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4, 5}
 					}
-					if (const_sym_num_1 != arr_symbol_dim_1) {
+					if (instant_num_1 != arr_symbol_dim_1) {
 						error::OutputError(token.get_line(), ArrInitNotMatch);
 					}
 					ExpectedOrError(RBRACE);	// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]={{1, 2, 3}, {4, 5}, ...}
@@ -875,19 +988,33 @@ void grammar::loop_statement() {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		ExpectedOrError(LPARENT);
-		grammar::condition();
+		Operand* entry_label = new LabelOperand(ProdLabelName());
+		// ENTRY_LABEL:
+		ir::AddQuaternionBack(Quaternion(LABEL, entry_label));
+		Operand *loperand_ptr = nullptr, *roperand_ptr = nullptr;
+		// 得到条件语句的关系运算符和左右操作符
+		OperatorType condition_operator = grammar::condition(loperand_ptr, roperand_ptr);
+		// BNE EXIT_LABEL, $t0, $t1
+		Operand* exit_label = new LabelOperand(ProdLabelName());
+		ir::AddQuaternionBack(Quaternion(condition_operator, exit_label, loperand_ptr, roperand_ptr));
 		ExpectedOrError(RPARENT);
-		statement();
+		// <语句>
+		grammar::statement();
+		// GOTO ENTRY_LABEL
+		ir::AddQuaternionBack(Quaternion(GOTO, entry_label));
+		// EXIT_LABEL:
+		ir::AddQuaternionBack(Quaternion(LABEL, exit_label));
 	}
 	else if (token.get_token_sym() == FORTK) {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		ExpectedOrError(LPARENT);
+		string symbol_name = "";
 		if (token.get_token_sym() != IDENFR) {
 			// error();
 		}
 		else {
-			string symbol_name = token.get_token_str();
+			symbol_name = token.get_token_str();
 			int symbol_line = token.get_line();
 			if (!symbol_table::IsNameDefined(symbol_name)) {
 				error::OutputError(symbol_line, NameNotDefine);
@@ -899,47 +1026,83 @@ void grammar::loop_statement() {
 			token = grammar::GetToken();
 		}
 		ExpectedOrError(ASSIGN);
-		grammar::expr();
+		Operand* symbol_operand_ptr = ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name));
+		Operand* expr_operand_ptr = nullptr;
+		grammar::expr(expr_operand_ptr);
+		// 可以进行优化，直接将expr中最后一个四元式dest_ptr换成symbol_operand_ptr，就可以不move了
+		ir::AddQuaternionBack(Quaternion(MV, symbol_operand_ptr, expr_operand_ptr));
 		ExpectedOrError(SEMICN);
-		grammar::condition();
+		// ENTRY_LABEL:
+		Operand* entry_label = new LabelOperand(ProdLabelName());
+		ir::AddQuaternionBack(Quaternion(LABEL, entry_label));
+		Operand *loperand_ptr = nullptr, *roperand_ptr = nullptr;
+		// 得到条件语句的关系运算符和左右操作符
+		OperatorType condition_operator = grammar::condition(loperand_ptr, roperand_ptr);
 		ExpectedOrError(SEMICN);
+		// BNE EXIT_LABEL, $t0, $t1
+		Operand* exit_label = new LabelOperand(ProdLabelName());
+		ir::AddQuaternionBack(Quaternion(condition_operator, exit_label, loperand_ptr, roperand_ptr));
+		
+		string step_dest_operand_name = "";
+		Operand* step_dest_operand_ptr = nullptr;
 		if (token.get_token_sym() != IDENFR) {
 			// error();
 		}
 		else {
-			string symbol_name = token.get_token_str();
+			step_dest_operand_name = token.get_token_str();
 			int symbol_line = token.get_line();
-			if (!symbol_table::IsNameDefined(symbol_name)) {
+			if (!symbol_table::IsNameDefined(step_dest_operand_name)) {
 				error::OutputError(symbol_line, NameNotDefine);
 			}
-			if (symbol_table::IsConSymbol(symbol_table::GetSymbolLatestType(symbol_name))) {
+			if (symbol_table::IsConSymbol(symbol_table::GetSymbolLatestType(step_dest_operand_name))) {
 				error::OutputError(symbol_line, ModifyConst);
 			}
-			if (symbol_table::GetSymbolLatestType(token.get_token_str()))
-				grammar::OutputToken(token);
+			step_dest_operand_ptr = ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(step_dest_operand_name));
+			grammar::OutputToken(token);
 			token = grammar::GetToken();
 		}
 		ExpectedOrError(ASSIGN);
+		string step_loperand_name = "";
+		Operand* step_loperand_ptr = nullptr;
 		if (token.get_token_sym() != IDENFR) {
 			// error();
 		}
 		else {
-			if (!symbol_table::IsNameDefined(token.get_token_str())) {
+			step_loperand_name = token.get_token_str();
+			if (!symbol_table::IsNameDefined(step_loperand_name)) {
 				error::OutputError(token.get_line(), NameNotDefine);
 			}
+			shared_ptr<Symbol> symbol_ptr = symbol_table::GetSymbolLatest(step_loperand_name);
+			if (symbol_table::IsConSymbol(symbol_ptr->get_symbol_type())) {
+				shared_ptr<VarSymbol> var_symbol_ptr = dynamic_pointer_cast<VarSymbol>(symbol_ptr);
+				step_loperand_ptr = new ImmeOperand(var_symbol_ptr->get_var_symbol_value());
+			}
+			else {
+				step_loperand_ptr = ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(step_loperand_name));
+			}
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 		}
+		OperatorType operator_type = OperatorType::ADDU;
 		if (token.get_token_sym() != PLUS && token.get_token_sym() != MINU) {
 			// error();
 		}
 		else {
+			operator_type = token.get_token_sym() == PLUS ? OperatorType::ADDU : OperatorType::SUBU;
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 		}
-		grammar::step();
+		int step_value = grammar::step();
+		Operand* step_roperand_ptr = new ImmeOperand(step_value);
+		Quaternion step_quat = Quaternion(operator_type, step_dest_operand_ptr, step_loperand_ptr, step_roperand_ptr);
 		ExpectedOrError(RPARENT);
 		grammar::statement();
+		// 步长操作
+		ir::AddQuaternionBack(step_quat);
+		// GOTO ENTRY_LABEL
+		ir::AddQuaternionBack(Quaternion(GOTO, entry_label));
+		// EXIT_LABEL:
+		ir::AddQuaternionBack(Quaternion(LABEL, exit_label));
 	}
 	else {
 		// 这种情况应该不会发生，因为是经过预读进入<循环语句>的
@@ -949,35 +1112,48 @@ void grammar::loop_statement() {
 }
 
 // <步长>::=<无符号整数>
-void grammar::step() {
-	grammar::unsigned_integer();
+int grammar::step() {
+	int value = grammar::unsigned_integer();
 	grammar::OutputGrammarElementName("<步长>");
+	return value;
 }
 
 // <条件语句>::=if'('<条件>')'<语句>[else<语句>]
 void grammar::condition_statement() {
 	ExpectedOrError(IFTK);
 	ExpectedOrError(LPARENT);
-	grammar::condition();
+	Operand *loperand_ptr = nullptr, *roperand_ptr = nullptr;
+	OperatorType condition_operator = grammar::condition(loperand_ptr, roperand_ptr);
+	Operand *false_label = new LabelOperand(ProdLabelName());
+	ir::AddQuaternionBack(Quaternion(condition_operator, false_label, loperand_ptr, roperand_ptr));
 	ExpectedOrError(RPARENT);
 	grammar::statement();
 	if (token.get_token_sym() == ELSETK) {
+		Operand *exit_label = new LabelOperand(ProdLabelName());
+		ir::AddQuaternionBack(Quaternion(GOTO, exit_label));
+		ir::AddQuaternionBack(Quaternion(LABEL, false_label));
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		grammar::statement();
+		ir::AddQuaternionBack(Quaternion(LABEL, exit_label));
+	}
+	else {
+		ir::AddQuaternionBack(Quaternion(LABEL, false_label));
 	}
 	grammar::OutputGrammarElementName("<条件语句>");
 }
 
 // <条件>::=<表达式><关系运算符><表达式>
-void grammar::condition() {
+OperatorType grammar::condition(Operand *&loperand_ptr, Operand*& roperand_ptr) {
 	int expr_line = token.get_line();
-	if (grammar::expr() != IntExpr) {
+	if (grammar::expr(loperand_ptr) != IntExpr) {
 		error::OutputError(expr_line, ConditionJudgeInvalidType);
 	}
-	if (token.get_token_sym() != LSS && token.get_token_sym() != LEQ &&
-		token.get_token_sym() != GRE && token.get_token_sym() != GEQ &&
-		token.get_token_sym() != EQL && token.get_token_sym() != NEQ) {
+	int relation_operator = token.get_token_sym();
+	OperatorType operator_type = UNKNOWN_OPERATOR_TYPE;
+	if (relation_operator != LSS && relation_operator != LEQ &&
+		relation_operator != GRE && relation_operator != GEQ &&
+		relation_operator != EQL && relation_operator != NEQ) {
 		// 应为关系运算符
 		// error();
 	}
@@ -985,11 +1161,34 @@ void grammar::condition() {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		expr_line = token.get_line();
-		if (grammar::expr() != IntExpr) {
+		if (grammar::expr(roperand_ptr) != IntExpr) {
 			error::OutputError(expr_line, ConditionJudgeInvalidType);
+		}
+		switch (relation_operator) {
+		case LSS:
+			operator_type = OperatorType::BGE;
+			break;
+		case LEQ:
+			operator_type = OperatorType::BGT;
+			break;
+		case GRE:
+			operator_type = OperatorType::BLE;
+			break;
+		case GEQ:
+			operator_type = OperatorType::BLT;
+			break;
+		case EQL:
+			operator_type = OperatorType::BNE;
+			break;
+		case NEQ:
+			operator_type = OperatorType::BEQ;
+			break;
+		default:
+			break;
 		}
 	}
 	grammar::OutputGrammarElementName("<条件>");
+	return operator_type;
 }
 
 // <有返回值函数调用语句>::=<标识符>'('<值参数表>')'
@@ -1004,7 +1203,7 @@ void grammar::func_call_with_ret() {
 			如果发现<未定义的名字>错误，首先报错，
 			然后因为一行只有一个错误，后面一定有';'结束这句话，所以就一直读到';'，退出这个子程序
 			*/
-			error::OutputError(token.get_line(), NameNotDefine);
+			error::OutputError(token.get_line(), ErrorType::NameNotDefine);
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 			while (token.get_token_sym() != SEMICN) {
@@ -1019,14 +1218,16 @@ void grammar::func_call_with_ret() {
 		ExpectedOrError(LPARENT);
 		vector<ExprType> value_para_type_syms = grammar::value_para_tlb();
 		// 此时token已经读到右小括号了，但是不存在恶意换行，所以可以直接用token.get_line()
-		int check_para_rst = symbol_table::CheckPara(func_name, value_para_type_syms);
-		if (check_para_rst == 1) {
-			error::OutputError(token.get_line(), ArgsNumNotMatch);
+		CheckParaRlt check_para_rst = symbol_table::CheckPara(func_name, value_para_type_syms);
+		if (check_para_rst == CheckParaRlt::ParaNumNotMatch) {
+			error::OutputError(token.get_line(), ErrorType::ArgsNumNotMatch);
 		}
-		else if (check_para_rst == 2) {
-			error::OutputError(token.get_line(), ArgsTypeNotMatch);
+		else if (check_para_rst == CheckParaRlt::ParaTypeNotMatch) {
+			error::OutputError(token.get_line(), ErrorType::ArgsTypeNotMatch);
 		}
 		ExpectedOrError(RPARENT);
+		Operand* func_label_operand_ptr = new LabelOperand("_" + func_name + "_Label");
+		ir::AddQuaternionBack(Quaternion(OperatorType::CALL, func_label_operand_ptr));
 	}
 	grammar::OutputGrammarElementName("<有返回值函数调用语句>");
 }
@@ -1043,7 +1244,7 @@ void grammar::func_call_no_ret() {
 			如果发现<未定义的名字>错误，首先报错，
 			然后因为一行只有一个错误，后面一定有';'结束这句话，所以就一直读到';'，退出这个子程序
 			*/
-			error::OutputError(token.get_line(), NameNotDefine);
+			error::OutputError(token.get_line(), ErrorType::NameNotDefine);
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 			while (token.get_token_sym() != SEMICN) {
@@ -1059,13 +1260,15 @@ void grammar::func_call_no_ret() {
 		vector<ExprType> value_para_type_syms = grammar::value_para_tlb();
 		// 此时token已经读到右小括号了，但是不存在恶意换行，所以可以直接用token.get_line()
 		CheckParaRlt check_para_rlt = symbol_table::CheckPara(func_name, value_para_type_syms);
-		if (check_para_rlt == ParaNumNotMatch) {
-			error::OutputError(token.get_line(), ArgsNumNotMatch);
+		if (check_para_rlt == CheckParaRlt::ParaNumNotMatch) {
+			error::OutputError(token.get_line(), ErrorType::ArgsNumNotMatch);
 		}
-		else if (check_para_rlt == ParaTypeNotMatch) {
-			error::OutputError(token.get_line(), ArgsTypeNotMatch);
+		else if (check_para_rlt == CheckParaRlt::ParaTypeNotMatch) {
+			error::OutputError(token.get_line(), ErrorType::ArgsTypeNotMatch);
 		}
 		ExpectedOrError(RPARENT);
+		Operand* func_label_operand_ptr = new LabelOperand("_" + func_name + "_Label");
+		ir::AddQuaternionBack(Quaternion(OperatorType::CALL, func_label_operand_ptr));
 	}
 	grammar::OutputGrammarElementName("<无返回值函数调用语句>");
 }
@@ -1073,14 +1276,19 @@ void grammar::func_call_no_ret() {
 // <值参数表>::=<表达式>{,<表达式>} | <空>
 vector<ExprType> grammar::value_para_tlb() {
 	vector<ExprType> value_para_type_syms;
+	vector<Operand*> value_para_values;
 	if (grammar::is_expr()) {
-		ExprType expr_type = grammar::expr();
-		value_para_type_syms.push_back(expr_type);
+		Operand* expr_operand_ptr = nullptr;
+		value_para_type_syms.push_back(grammar::expr(expr_operand_ptr));
+		value_para_values.push_back(expr_operand_ptr);
 		while (token.get_token_sym() == COMMA) {
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			expr_type = grammar::expr();
-			value_para_type_syms.push_back(expr_type);
+			value_para_type_syms.push_back(grammar::expr(expr_operand_ptr));
+			value_para_values.push_back(expr_operand_ptr);
+		}
+		for (int i = 0; i < value_para_values.size(); i++) {
+			ir::AddQuaternionBack(Quaternion(OperatorType::MV, new SymbolOperand("$a" + to_string(i)), value_para_values[i]));
 		}
 	}
 	grammar::OutputGrammarElementName("<值参数表>");
@@ -1105,34 +1313,57 @@ void grammar::assign_statement() {
 		if (symbol_table::IsConSymbol(symbol_table::GetSymbolLatestType(symbol_name))) {
 			error::OutputError(symbol_line, ModifyConst);
 		}
+		Operand* symbol_operand_ptr = ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name));
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		if (token.get_token_sym() == ASSIGN) {
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			grammar::expr();
+			Operand* expr_operand_ptr = nullptr;
+			grammar::expr(expr_operand_ptr);
+			ir::AddQuaternionBack(Quaternion(MV, symbol_operand_ptr, expr_operand_ptr));
 		}
 		else if (token.get_token_sym() == LBRACK) {
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			if (grammar::expr() != IntExpr) {
+			shared_ptr<ArrSymbol> arr_symbol_ptr = dynamic_pointer_cast<ArrSymbol>(symbol_table::GetSymbolLatest(symbol_name));
+			//int arr_symbol_dim_1 = arr_symbol_ptr->get_arr_symbol_dim_1();
+			Operand* dim_1_operand_ptr = nullptr;
+			if (grammar::expr(dim_1_operand_ptr) != IntExpr) {
 				error::OutputError(token.get_line(), ArrIndexNotInt);
 			}
 			ExpectedOrError(RBRACK);
 			if (token.get_token_sym() == ASSIGN) {
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
-				grammar::expr();
+				Operand* expr_operand_ptr = nullptr;
+				grammar::expr(expr_operand_ptr);
+				ir::AddQuaternionBack(Quaternion(OperatorType::STORE, expr_operand_ptr, symbol_operand_ptr, dim_1_operand_ptr));
 			}
 			else if (token.get_token_sym() == LBRACK) {
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
-				if (grammar::expr() != IntExpr) {
+				int arr_symbol_dim_2 = arr_symbol_ptr->get_arr_symbol_dim_2();
+				Operand* dim_2_operand_ptr = nullptr;
+				if (grammar::expr(dim_2_operand_ptr) != IntExpr) {
 					error::OutputError(token.get_line(), ArrIndexNotInt);
 				}
 				ExpectedOrError(RBRACK);
 				ExpectedOrError(ASSIGN);
-				grammar::expr();
+				Operand* expr_operand_ptr = nullptr;
+				grammar::expr(expr_operand_ptr);
+				// a[0..i..n][0..j..m]
+				Operand* temp_operand_1_ptr = ir::ProdTempOperandPtr();
+				Operand* dim_2_imme_operand_ptr = new ImmeOperand(arr_symbol_dim_2);
+				// li $t0, m
+				ir::AddQuaternionBack(Quaternion(OperatorType::LOAD_IMM, temp_operand_1_ptr, dim_2_imme_operand_ptr));
+				Operand* temp_operand_2_ptr = ir::ProdTempOperandPtr();
+				// mul $t1, i, $t0
+				ir::AddQuaternionBack(Quaternion(OperatorType::MUL, temp_operand_2_ptr, dim_1_operand_ptr, temp_operand_1_ptr));
+				temp_operand_1_ptr = ir::ProdTempOperandPtr();
+				// add $t2, $t1, j
+				ir::AddQuaternionBack(Quaternion(OperatorType::ADDU, temp_operand_1_ptr, temp_operand_2_ptr, dim_2_operand_ptr));
+				ir::AddQuaternionBack(Quaternion(OperatorType::STORE, expr_operand_ptr, symbol_operand_ptr, temp_operand_1_ptr));
 			}
 			else {
 				// error();
@@ -1158,8 +1389,17 @@ void grammar::input_statement() {
 		if (!symbol_table::IsNameDefined(symbol_name)) {
 			error::OutputError(symbol_line, NameNotDefine);
 		}
-		if (symbol_table::IsConSymbol(symbol_table::GetSymbolLatestType(symbol_name))) {
+		SymbolType symbol_type = symbol_table::GetSymbolLatestType(symbol_name);
+		if (symbol_table::IsConSymbol(symbol_type)) {
 			error::OutputError(symbol_line, ModifyConst);
+		}
+		// 添加四元式
+		shared_ptr<Symbol> symbol_ptr = symbol_table::GetSymbolLatest(symbol_name);
+		if (symbol_type == IntVarSym) {
+			ir::AddQuaternionBack(Quaternion(OperatorType::READ_INT, ir::GetSymbolOperandPtr(symbol_ptr)));
+		}
+		else if (symbol_type == CharVarSym) {
+			ir::AddQuaternionBack(Quaternion(OperatorType::READ_CHAR, ir::GetSymbolOperandPtr(symbol_ptr)));
 		}
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
@@ -1172,12 +1412,23 @@ void grammar::input_statement() {
 void grammar::output_statement() {
 	ExpectedOrError(PRINTFTK);
 	ExpectedOrError(LPARENT);
+	Operand* expr_operand_ptr = nullptr;
 	if (token.get_token_sym() == STRCON) {
-		grammar::string_sym();
+		string string_value = grammar::string_sym();
+		// 生成StringOperand类的操作数
+		Operand* string_operand_ptr = new StringOperand(ir::ProdStringName(), string_value);
+		// 添加到quat_vector中
+		// str_name: .asciiz "..."
+		ir::AddQuaternionHead(Quaternion(OperatorType::STR_VAR, string_operand_ptr));
+		ir::AddQuaternionBack(Quaternion(OperatorType::PRINT_STRING, string_operand_ptr));
 		if (token.get_token_sym() == COMMA) {
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			grammar::expr();
+			ExprType expr_type = grammar::expr(expr_operand_ptr);
+			if (expr_type == IntExpr || expr_type == CharExpr) {
+				OperatorType operator_type = expr_type == IntExpr ? OperatorType::PRINT_INT : OperatorType::PRINT_CHAR;
+				ir::AddQuaternionBack(Quaternion(operator_type, expr_operand_ptr));
+			}
 			ExpectedOrError(RPARENT);
 		}
 		else if (token.get_token_sym() == RPARENT) {
@@ -1189,9 +1440,15 @@ void grammar::output_statement() {
 		}
 	}
 	else {
-		grammar::expr();
+		ExprType expr_type = grammar::expr(expr_operand_ptr);
+		if (expr_type == IntExpr || expr_type == CharExpr) {
+			OperatorType operator_type = expr_type == IntExpr ? OperatorType::PRINT_INT : OperatorType::PRINT_CHAR;
+			ir::AddQuaternionBack(Quaternion(operator_type, expr_operand_ptr));
+		}
 		ExpectedOrError(RPARENT);
 	}
+	// enter_str:	.asciiz	"\n";
+	ir::AddQuaternionBack(Quaternion(OperatorType::PRINT_STRING, (Operand*)&enter_string_opreand_ptr));
 	grammar::OutputGrammarElementName("<写语句>");
 }
 
@@ -1199,40 +1456,58 @@ void grammar::output_statement() {
 void grammar::case_statement() {
 	ExpectedOrError(SWITCHTK);
 	ExpectedOrError(LPARENT);
-	ExprType expr_type = grammar::expr();
+	Operand* expr_operand_ptr = nullptr;
+	ExprType expr_type = grammar::expr(expr_operand_ptr);
 	ExpectedOrError(RPARENT);
 	ExpectedOrError(LBRACE);
-	grammar::case_tlb(expr_type);
-	grammar::default_statement();
+	Operand* exit_label_operand_ptr = new LabelOperand(ProdLabelName());
+	Operand* next_label_operand_ptr = nullptr;
+	grammar::case_tlb(expr_type, expr_operand_ptr, next_label_operand_ptr, exit_label_operand_ptr);
+	grammar::default_statement(next_label_operand_ptr);
 	ExpectedOrError(RBRACE);
+	ir::AddQuaternionBack(Quaternion(LABEL, exit_label_operand_ptr));
 	grammar::OutputGrammarElementName("<情况语句>");
 }
 
 // <情况表>::=<情况子语句>{<情况子语句>}
-void grammar::case_tlb(ExprType expr_type) {
-	grammar::case_substatement(expr_type);
+void grammar::case_tlb(ExprType expr_type, Operand*& expr_operand_ptr, Operand*& next_label_operand_ptr, Operand*& exit_label_operand_ptr) {
+	Operand* entry_label_operand_ptr = new LabelOperand(ProdLabelName());
+	next_label_operand_ptr = new LabelOperand(ProdLabelName());
+	grammar::case_substatement(expr_type, expr_operand_ptr, entry_label_operand_ptr, next_label_operand_ptr, exit_label_operand_ptr);
 	while (token.get_token_sym() == CASETK) {
-		grammar::case_substatement(expr_type);
+		entry_label_operand_ptr = next_label_operand_ptr;
+		next_label_operand_ptr = new LabelOperand(ProdLabelName());
+		grammar::case_substatement(expr_type, expr_operand_ptr, entry_label_operand_ptr, next_label_operand_ptr, exit_label_operand_ptr);
 	}
 	grammar::OutputGrammarElementName("<情况表>");
 }
 
 // <情况子语句>::=case <常量>: <语句>
-void grammar::case_substatement(ExprType expr_type) {
+void grammar::case_substatement(ExprType expr_type, Operand*& expr_operand_ptr, Operand* entry_label_operand_ptr, 
+	Operand* next_label_operand_ptr, Operand*& exit_label_operand_ptr) {
+	// Label_1:
+	ir::AddQuaternionBack(Quaternion(OperatorType::LABEL, entry_label_operand_ptr));
 	ExpectedOrError(CASETK);
-	grammar::const_sym(expr_type);
+	int instant_value = grammar::const_sym(expr_type);
+	Operand* imme_operand_ptr = new ImmeOperand(instant_value);
+	// BNE Label_2, <表达式>, <常量>
+	ir::AddQuaternionBack(Quaternion(OperatorType::BNE, next_label_operand_ptr, expr_operand_ptr, imme_operand_ptr));
+	
 	ExpectedOrError(COLON);
 	grammar::statement();
+	// GOTO exit_label
+	ir::AddQuaternionBack(Quaternion(OperatorType::GOTO, exit_label_operand_ptr));
 	grammar::OutputGrammarElementName("<情况子语句>");
 }
 
 // <缺省>::=default: <语句>
-void grammar::default_statement() {
+void grammar::default_statement(Operand*& next_label_operand_ptr) {
 	if (token.get_token_sym() != DEFAULTTK) {
 		// 如果缺少缺省语句，报错后直接退出，因为后面一定是'}'
 		error::OutputError(token.get_line(), DefaultMiss);
 	}
 	else {
+		ir::AddQuaternionBack(Quaternion(LABEL, next_label_operand_ptr));
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		ExpectedOrError(COLON);
@@ -1244,16 +1519,16 @@ void grammar::default_statement() {
 // <返回语句>::=return['('<表达式>')']
 void grammar::ret_statement() {
 	ExpectedOrError(RETURNTK);
-	if (return_state == InIntRetFuncNoReturn) {
-		return_state = InIntRetFuncWithReturn;
+	if (return_state == ReturnState::InIntRetFuncNoReturn) {
+		return_state = ReturnState::InIntRetFuncWithReturn;
 	}
-	else if (return_state == InCharRetFuncNoReturn) {
-		return_state = InCharRetFuncWithReturn;
+	else if (return_state == ReturnState::InCharRetFuncNoReturn) {
+		return_state = ReturnState::InCharRetFuncWithReturn;
 	}
 	if (token.get_token_sym() == LPARENT) {
-		if (return_state == InNoRetFunc) {
+		if (return_state == ReturnState::InNoRetFunc) {
 			// 无返回值的函数有形如return(表达式);或return();的语句
-			error::OutputError(token.get_line(), NoRetFuncReturn);
+			error::OutputError(token.get_line(), ErrorType::NoRetFuncReturn);
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 			while (token.get_token_sym() != SEMICN) {
@@ -1266,61 +1541,86 @@ void grammar::ret_statement() {
 			token = grammar::GetToken();
 			if (token.get_token_sym() == RPARENT && return_state >= 1) {
 				// 有返回值的函数有形如return();的语句
-				error::OutputError(token.get_line(), RetFuncMissReturn);
+				error::OutputError(token.get_line(), ErrorType::RetFuncMissReturn);
 			} 
 			else {
-				ExprType expr_type = grammar::expr();
-				// cout << expr_type << endl;
-				if ((return_state == InIntRetFuncWithReturn && expr_type != IntExpr) ||
-					(return_state == InCharRetFuncWithReturn && expr_type != CharExpr)) {
+				Operand* expr_operand_ptr = nullptr;
+				ExprType expr_type = grammar::expr(expr_operand_ptr);
+				if ((return_state == ReturnState::InIntRetFuncWithReturn && expr_type != ExprType::IntExpr) ||
+					(return_state == ReturnState::InCharRetFuncWithReturn && expr_type != ExprType::CharExpr)) {
 					// 有返回值的函数的return语句中表达式类型与返回值类型不一致
-					error::OutputError(token.get_line(), RetFuncMissReturn);
+					error::OutputError(token.get_line(), ErrorType::RetFuncMissReturn);
+				}
+				else {
+					ir::AddQuaternionBack(Quaternion(OperatorType::RET, (Operand*)&v0_symbol_operand_ptr, expr_operand_ptr));
 				}
 			}
 			ExpectedOrError(RPARENT);
 		}
 	}
-	else if (token.get_token_sym() == SEMICN && (return_state == InIntRetFuncNoReturn || 
-		return_state == InCharRetFuncNoReturn || return_state == InIntRetFuncWithReturn || 
-		return_state == InCharRetFuncWithReturn)) {
-		// 有返回值的函数有形如return;的语句
-		error::OutputError(token.get_line(), RetFuncMissReturn);
+	else if (token.get_token_sym() == SEMICN) {
+		if ((return_state == ReturnState::InIntRetFuncNoReturn ||
+			return_state == ReturnState::InCharRetFuncNoReturn || return_state == ReturnState::InIntRetFuncWithReturn ||
+			return_state == ReturnState::InCharRetFuncWithReturn)) {
+			// 有返回值的函数有形如return;的语句
+			error::OutputError(token.get_line(), ErrorType::RetFuncMissReturn);
+		} else {
+			ir::AddQuaternionBack(Quaternion(OperatorType::RET, nullptr));
+		}
 	}
 	grammar::OutputGrammarElementName("<返回语句>");
 }
 
 // <表达式>::=[+|-]<项>{<加法运算符><项>}
-ExprType grammar::expr() {
+ExprType grammar::expr(Operand*& operand_ptr) {
 	ExprType expr_type = VoidExpr;
+	bool is_first_sym_minu = false;
 	if (token.get_token_sym() == PLUS || token.get_token_sym() == MINU) {
+		is_first_sym_minu = token.get_token_sym() == MINU ? true : false;
 		expr_type = IntExpr;
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 	}
-	ExprType term_type = grammar::term();
-	if (expr_type == VoidExpr) {
-		expr_type = term_type;
+	Operand* first_operand_ptr = nullptr;
+	ExprType term_type = grammar::term(first_operand_ptr);
+	expr_type = expr_type == VoidExpr ? term_type : expr_type;
+	if (is_first_sym_minu) {
+		Operand* temp_symbol_operand_ptr = ir::ProdTempOperandPtr();
+		ir::AddQuaternionBack(Quaternion(OperatorType::SUBU, temp_symbol_operand_ptr, (Operand*)&zero_imme_operand_ptr, first_operand_ptr));
+		first_operand_ptr = temp_symbol_operand_ptr;
 	}
+	Operand* next_operand_ptr = nullptr;
 	while (token.get_token_sym() == PLUS || token.get_token_sym() == MINU) {
+		OperatorType operator_type = token.get_token_sym() == PLUS ? OperatorType::ADDU : OperatorType::SUBU;
 		expr_type = IntExpr;
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		// 已经确认是整型表达式
-		grammar::term();
+		grammar::term(next_operand_ptr);
+		Operand* temp_symbol_operand_ptr = ir::ProdTempOperandPtr();
+		ir::AddQuaternionBack(Quaternion(operator_type, temp_symbol_operand_ptr, first_operand_ptr, next_operand_ptr));
+		first_operand_ptr = temp_symbol_operand_ptr;
 	}
+	operand_ptr = first_operand_ptr;
 	grammar::OutputGrammarElementName("<表达式>");
 	return expr_type;
 }
 
 // <项>::=<因子>{<乘法运算符><因子>}
-ExprType grammar::term() {
-	ExprType term_type = grammar::factor();
+ExprType grammar::term(Operand *&operand_ptr) {
+	Operand *first_operand_ptr = nullptr, *next_operand_ptr = nullptr;
+	ExprType term_type = grammar::factor(first_operand_ptr);
 	while (token.get_token_sym() == MULT || token.get_token_sym() == DIV) {
+		OperatorType operator_type = token.get_token_sym() == MULT ? OperatorType::MUL : OperatorType::DIVI;
 		term_type = IntExpr;
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
-		grammar::factor();
+		grammar::factor(next_operand_ptr);
+		Operand* temp_symbol_operand_ptr = ir::ProdTempOperandPtr();
+		ir::AddQuaternionBack(Quaternion(operator_type, temp_symbol_operand_ptr, first_operand_ptr, next_operand_ptr));
+		first_operand_ptr = temp_symbol_operand_ptr;
 	}
+	operand_ptr = first_operand_ptr;
 	grammar::OutputGrammarElementName("<项>");
 	return term_type;
 }
@@ -1334,7 +1634,7 @@ ExprType grammar::term() {
 		| <字符>
 		| <有返回值函数调用语句>
 */
-ExprType grammar::factor() {
+ExprType grammar::factor(Operand *&operand_ptr) {
 	ExprType factor_type = IntExpr;
 	if (grammar::is_func_call()) {
 		/*
@@ -1348,47 +1648,84 @@ ExprType grammar::factor() {
 			factor_type = CharExpr;
 		}
 		grammar::func_call_with_ret();
+		operand_ptr = ir::ProdTempOperandPtr();
+		ir::AddQuaternionBack(Quaternion(MV, operand_ptr, (Operand*)&v0_symbol_operand_ptr));
 	}
 	else if (token.get_token_sym() == IDENFR) {
-		if (!symbol_table::IsNameDefined(token.get_token_str())) {
+		string idenfr_name = token.get_token_str();
+		if (!symbol_table::IsNameDefined(idenfr_name)) {
 			error::OutputError(token.get_line(), NameNotDefine);
 		}
-		if (symbol_table::GetSymbolLatestType(token.get_token_str()) == CharVarSym ||
-			symbol_table::GetSymbolLatestType(token.get_token_str()) == CharConSym ||
-			symbol_table::GetSymbolLatestType(token.get_token_str()) == CharArrSym) {
-			factor_type = CharExpr;
+		shared_ptr<Symbol> symbol_ptr = symbol_table::GetSymbolLatest(idenfr_name);
+		Operand* idenfr_operand_ptr = ir::GetSymbolOperandPtr(symbol_ptr);
+		SymbolType symbol_type = symbol_ptr->get_symbol_type();
+		if (symbol_type == SymbolType::CharVarSym || symbol_type == SymbolType::CharConSym || 
+			symbol_type == SymbolType::CharArrSym) {
+			factor_type = ExprType::CharExpr;
 		}
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		if (token.get_token_sym() == LBRACK) {
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-			if (grammar::expr() != IntExpr) {
+			Operand* dim_1_operand_ptr = nullptr;
+			if (grammar::expr(dim_1_operand_ptr) != ExprType::IntExpr) {
 				error::OutputError(token.get_line(), ArrIndexNotInt);
 			}
 			ExpectedOrError(RBRACK);
+			operand_ptr = ir::ProdTempOperandPtr();
 			if (token.get_token_sym() == LBRACK) {
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
-				if (grammar::expr() != IntExpr) {
+				Operand* dim_2_operand_ptr = nullptr;
+				if (grammar::expr(dim_2_operand_ptr) != ExprType::IntExpr) {
 					error::OutputError(token.get_line(), ArrIndexNotInt);
 				}
 				ExpectedOrError(RBRACK);
+				shared_ptr<ArrSymbol> arr_symbol_ptr = dynamic_pointer_cast<ArrSymbol>(symbol_table::GetSymbolLatest(idenfr_name));
+				int arr_symbol_dim_2 = arr_symbol_ptr->get_arr_symbol_dim_2();
+				// a[0..i..n][0..j..m]
+				Operand* temp_operand_1_ptr = ir::ProdTempOperandPtr();
+				Operand* dim_2_imme_operand_ptr = new ImmeOperand(arr_symbol_dim_2);
+				// li $t0, m
+				ir::AddQuaternionBack(Quaternion(OperatorType::LOAD_IMM, temp_operand_1_ptr, dim_2_imme_operand_ptr));
+				Operand* temp_operand_2_ptr = ir::ProdTempOperandPtr();
+				// mul $t1, i, $t0
+				ir::AddQuaternionBack(Quaternion(OperatorType::MUL, temp_operand_2_ptr, dim_1_operand_ptr, temp_operand_1_ptr));
+				temp_operand_1_ptr = ir::ProdTempOperandPtr();
+				// add $t2, $t1, j
+				ir::AddQuaternionBack(Quaternion(OperatorType::ADDU, temp_operand_1_ptr, temp_operand_2_ptr, dim_2_operand_ptr));
+				ir::AddQuaternionBack(Quaternion(OperatorType::LOAD, operand_ptr, idenfr_operand_ptr, temp_operand_1_ptr));
+			}
+			else {
+				ir::AddQuaternionBack(Quaternion(OperatorType::LOAD, operand_ptr, idenfr_operand_ptr, dim_1_operand_ptr));
+			}
+		}
+		else {
+			// <标识符>
+			if (symbol_table::IsConSymbol(symbol_ptr->get_symbol_type())) {
+				shared_ptr<VarSymbol> var_symbol_ptr = dynamic_pointer_cast<VarSymbol>(symbol_ptr);
+				operand_ptr = new ImmeOperand(var_symbol_ptr->get_var_symbol_value());
+			}
+			else {
+				operand_ptr = idenfr_operand_ptr;
 			}
 		}
 	}
 	else if (token.get_token_sym() == LPARENT) {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
-		grammar::expr();
+		grammar::expr(operand_ptr);
 		ExpectedOrError(RPARENT);
 	}
-	else if (token.get_token_sym() == PLUS || token.get_token_sym() == MINU ||
-		token.get_token_sym() == INTCON) {
-		grammar::integer();
+	else if (token.get_token_sym() == PLUS || token.get_token_sym() == MINU || token.get_token_sym() == INTCON) {
+		int value = grammar::integer();
+		operand_ptr = new ImmeOperand(value);
 	}
 	else if (token.get_token_sym() == CHARCON) {
 		factor_type = CharExpr;
+		int value = token.get_token_str()[0];
+		operand_ptr = new ImmeOperand(value);
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 	}
@@ -1400,35 +1737,50 @@ ExprType grammar::factor() {
 }
 
 // <字符串>::="{十进制编码为32,33,35-126的ASCII字符}"
-void grammar::string_sym() {
-	ExpectedOrError(STRCON);
+string grammar::string_sym() {
+	string string_value = "";
+	if (token.get_token_sym() != STRCON) {
+		// error();
+	}
+	else {
+		string_value = token.get_token_str();
+		grammar::OutputToken(token);
+		token = grammar::GetToken();
+	}
 	grammar::OutputGrammarElementName("<字符串>");
+	return string_value;
 }
 
 // <常量>::=<整数> | <字符>
-void grammar::const_sym(ExprType expr_type) {
-	if ((expr_type == CharExpr && token.get_token_sym() != CHARCON) || 
-		(expr_type == IntExpr && token.get_token_sym() == CHARCON)) {
+int grammar::const_sym(ExprType expr_type) {
+	if ((expr_type == ExprType::CharExpr && token.get_token_sym() != CHARCON) ||
+		(expr_type == ExprType::IntExpr && token.get_token_sym() == CHARCON)) {
 		error::OutputError(token.get_line(), VarTypeNotMatch);
 	}
+	int value;
 	if (token.get_token_sym() == CHARCON) {
+		value = token.get_token_str()[0];
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 	}
 	else {
-		grammar::integer();
+		value = grammar::integer();
 	}
 	grammar::OutputGrammarElementName("<常量>");
+	return value;
 }
 
 // <整数>::=[+|-]<无符号整数>
-void grammar::integer() {
+int grammar::integer() {
+	bool is_minu = false;
 	if (token.get_token_sym() == PLUS || token.get_token_sym() == MINU) {
+		is_minu = token.get_token_sym() == MINU ? true : false;
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 	}
-	grammar::unsigned_integer();
+	int num = grammar::unsigned_integer();
 	grammar::OutputGrammarElementName("<整数>");
+	return is_minu ? -num : num;
 }
 
 // <无符号整数>::= <数字>{<数字>}

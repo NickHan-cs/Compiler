@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 
-const bool ERROR_TYPE_OUTPUT = true;
+const bool ERROR_TYPE_OUTPUT = false;
 const bool ERROR_DESCRIPTION_OUTPUT = false;
 const bool ERROR_ANALYSIS_DEBUG = false;
 
