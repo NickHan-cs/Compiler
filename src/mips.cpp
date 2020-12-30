@@ -687,8 +687,12 @@ void mips::GenArithCode(Quaternion quat) {
 		case OperatorType::SUBU: {
 			if (loperand_value != 0) {
 				mips::AddMipsCode("\taddiu " + dest_name + ", " + roperand_name + ", " + to_string(-loperand_value));
+				mips::AddMipsCode("\tneg " + dest_name + ", " + dest_name);
 			}
-			mips::AddMipsCode("\tneg " + dest_name + ", " + roperand_name);
+			else {
+				mips::AddMipsCode("\tneg " + dest_name + ", " + roperand_name);
+			}
+			
 			break;
 		}
 		case OperatorType::MUL: {
@@ -715,9 +719,14 @@ void mips::GenArithCode(Quaternion quat) {
 			break;
 		}
 		case OperatorType::DIVI: {
-			mips::AddMipsCode("\tli $a0, " + to_string(loperand_value));
-			mips::AddMipsCode("\tdiv $a0, " + roperand_name);
-			mips::AddMipsCode("\tmflo " + dest_name);
+			if (loperand_value == 0) {
+				mips::AddMipsCode("\tli " + dest_name + ", 0");
+			}
+			else {
+				mips::AddMipsCode("\tli $a0, " + to_string(loperand_value));
+				mips::AddMipsCode("\tdiv $a0, " + roperand_name);
+				mips::AddMipsCode("\tmflo " + dest_name);
+			}
 			break;
 		}
 		default:

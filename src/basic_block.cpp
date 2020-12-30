@@ -29,7 +29,7 @@ vector<BasicBlock*> DivideBasicBlocks(shared_ptr<vector<Quaternion>> ir_vector_p
 	return basic_block_ptrs;
 }
 
-void GenFlowGraph(shared_ptr<vector<Quaternion>> const ir_vector_ptr, const vector<BasicBlock*> basic_block_ptrs) {
+void GenFlowGraph(const shared_ptr<vector<Quaternion>> ir_vector_ptr, const vector<BasicBlock*> basic_block_ptrs) {
 	// key-中间代码的位置	value-该中间代码所处的基本块指针
 	unordered_map<int, BasicBlock*> ir_idx2basic_block_ptr;
 	// key-标签名	value-该标签在中间代码中的位置
@@ -73,7 +73,7 @@ void GenFlowGraph(shared_ptr<vector<Quaternion>> const ir_vector_ptr, const vect
 	}
 }
 
-void GenUseDefSet(shared_ptr<vector<Quaternion>> const ir_vector_ptr, const vector<BasicBlock*> basic_block_ptrs) {
+void GenUseDefSet(const shared_ptr<vector<Quaternion>> ir_vector_ptr, const vector<BasicBlock*> basic_block_ptrs) {
 	for (auto basic_block_ptr : basic_block_ptrs) {
 		// 记录在该基本块中已经出现过标识符操作数名
 		set<string> visited_var_symbol_names;
@@ -137,11 +137,11 @@ set<string> set_difference(set<string> a, set<string> b) {
 	return rlt;
 }
 
-void GenInOutSet(shared_ptr<vector<Quaternion>> const ir_vector_ptr, const vector<BasicBlock*> basic_block_ptrs) {
+void GenInOutSet(const shared_ptr<vector<Quaternion>> ir_vector_ptr, const vector<BasicBlock*> basic_block_ptrs) {
 	// 为每个基本块循环计算in和out集合，直到所有基本块的in集合不再产生变化为止
-	bool is_finished = false;
-	while (!is_finished) {
-		is_finished = true;
+	bool flag = false;
+	while (!flag) {
+		flag = true;
 		for (auto basic_block_ptr : basic_block_ptrs) {
 			set<string> out_set;
 			for (auto next_basic_block_ptr : basic_block_ptr->next_basic_block_ptrs) {
@@ -152,14 +152,87 @@ void GenInOutSet(shared_ptr<vector<Quaternion>> const ir_vector_ptr, const vecto
 			// in[B] = use[B] U (out[B] - def[B])
 			set<string> in_set = set_union(basic_block_ptr->use_set, set_difference(basic_block_ptr->out_set, basic_block_ptr->def_set));
 			if (basic_block_ptr->in_set != in_set) {
-				is_finished = false;
+				flag = false;
 				basic_block_ptr->in_set = in_set;
 			}
 		}
 	}
 }
 
-void LiveVariableAnalysis(shared_ptr<vector<Quaternion>> const ir_vector_ptr, const vector<BasicBlock*> basic_block_ptrs) {
+void LiveVariableAnalysis(const shared_ptr<vector<Quaternion>> ir_vector_ptr, const vector<BasicBlock*> basic_block_ptrs) {
 	GenUseDefSet(ir_vector_ptr, basic_block_ptrs);
 	GenInOutSet(ir_vector_ptr, basic_block_ptrs);
+}
+
+set<int> GetDeadCodes(const shared_ptr<vector<Quaternion>> ir_vector_ptr, const vector<BasicBlock*> basic_block_ptrs) {
+	set<int> dead_codes_idxs;
+	unordered_map<int, set<string>> code_idx2def_set;
+	unordered_map<int, set<string>> code_idx2use_set;
+	unordered_map<int, set<string>> code_idx2in_set;
+	unordered_map<int, set<string>> code_idx2out_set;
+
+	for (auto basic_block_ptr : basic_block_ptrs) {
+		for (int i = basic_block_ptr->begin_ir_idx; i <= basic_block_ptr->end_ir_idx; i++) {
+			set<string> visited_var_symbol_names;
+			OperatorType op = (*ir_vector_ptr)[i].get_op();
+			if (op >= OperatorType::VAR && op <= OperatorType::PARAM) {
+				continue;
+			}
+			Operand* loperand_ptr = (*ir_vector_ptr)[i].get_loperand_ptr();
+			if (loperand_ptr != nullptr && ir::IsVarSymbolOperand(loperand_ptr) &&
+				visited_var_symbol_names.find(loperand_ptr->ToString()) == visited_var_symbol_names.end()) {
+				string var_symbol_name = loperand_ptr->ToString();
+				code_idx2use_set[i].insert(var_symbol_name);
+				visited_var_symbol_names.insert(var_symbol_name);
+			}
+			Operand* roperand_ptr = (*ir_vector_ptr)[i].get_roperand_ptr();
+			if (roperand_ptr != nullptr && ir::IsVarSymbolOperand(roperand_ptr) &&
+				visited_var_symbol_names.find(roperand_ptr->ToString()) == visited_var_symbol_names.end()) {
+				string var_symbol_name = roperand_ptr->ToString();
+				code_idx2use_set[i].insert(var_symbol_name);
+				visited_var_symbol_names.insert(var_symbol_name);
+			}
+			Operand* dest_ptr = (*ir_vector_ptr)[i].get_dest_ptr();
+			if (dest_ptr != nullptr && ir::IsVarSymbolOperand(dest_ptr) &&
+				visited_var_symbol_names.find(dest_ptr->ToString()) == visited_var_symbol_names.end()) {
+				string var_symbol_name = dest_ptr->ToString();
+				visited_var_symbol_names.insert(var_symbol_name);
+				if (var_symbol_name.substr(0, 3) == "_0_" ||
+					use_dest_operators_set.find(op) != use_dest_operators_set.end()) {
+					code_idx2use_set[i].insert(var_symbol_name);
+				}
+				else if (def_dest_operators_set.find(op) != def_dest_operators_set.end()) {
+					code_idx2def_set[i].insert(var_symbol_name);
+				}
+			}
+		}
+	}
+
+	for (auto basic_block_ptr : basic_block_ptrs) {
+		bool flag = false;
+		while (!flag) {
+			flag = true;
+			for (int i = basic_block_ptr->end_ir_idx; i >= basic_block_ptr->begin_ir_idx; i--) {
+				set<string> out_set, in_set;
+				code_idx2out_set[i] = i == basic_block_ptr->end_ir_idx ? basic_block_ptr->out_set : code_idx2in_set[i + 1];
+				in_set = set_union(code_idx2use_set[i], set_difference(code_idx2out_set[i], code_idx2def_set[i]));
+				if (in_set != code_idx2in_set[i]) {
+					flag = false;
+					code_idx2in_set[i] = in_set;
+				}
+			}
+		}
+		for (int i = basic_block_ptr->begin_ir_idx; i <= basic_block_ptr->end_ir_idx; i++) {
+			OperatorType op = (*ir_vector_ptr)[i].get_op();
+			Operand* dest_ptr = (*ir_vector_ptr)[i].get_dest_ptr();
+			if (dest_ptr != nullptr && ir::IsVarSymbolOperand(dest_ptr) &&
+				def_dest_operators_set.find(op) != def_dest_operators_set.end() &&
+				code_idx2out_set[i].find(dest_ptr->ToString()) == code_idx2out_set[i].end() &&
+				op != OperatorType::READ_INT && op != OperatorType::READ_CHAR) {
+				dead_codes_idxs.insert(i);
+			}
+		}
+	}
+
+	return dead_codes_idxs;
 }

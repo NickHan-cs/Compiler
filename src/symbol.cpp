@@ -113,24 +113,20 @@ bool symbol_table::AddFuncSymbol(string func_name, SymbolType symbol_type, int s
 }
 
 void symbol_table::DelCurLevelSymbol(int cur_level) {
-	// 这里是直接删除符号还是将其移动到另一片内存空间，有待商榷，暂且选择删除
 	if (symbol_ptr_vector.empty()) {
 		return;
 	}
 	shared_ptr<Symbol> symbol_ptr = symbol_ptr_vector.back();
 	while (symbol_ptr->get_symbol_level() == cur_level) {
 		string symbol_name = symbol_ptr->get_symbol_name();
-
 		assert(name2index_map.find(symbol_name) != name2index_map.end());
 		shared_ptr<vector<int>> index_vector_ptr = name2index_map.at(symbol_name);
-		
 		assert(index_vector_ptr->back() == symbol_ptr_vector.size() - 1);
 		index_vector_ptr->pop_back();
 		if (index_vector_ptr->empty()) {
 			// 如果删除该符号后，发现该作用域外没有该符号，就从name2index_map中删除这个键值对
 			name2index_map.erase(symbol_name);
 		}
-
 		symbol_ptr_vector.pop_back();
 		if (symbol_ptr_vector.empty()) {
 			return;
@@ -140,25 +136,26 @@ void symbol_table::DelCurLevelSymbol(int cur_level) {
 }
 
 bool symbol_table::IsConSymbol(SymbolType symbol_type) {
-	return symbol_type == IntConSym || symbol_type == CharConSym;
+	return symbol_type == SymbolType::IntConSym || symbol_type == SymbolType::CharConSym;
 }
 
 bool symbol_table::IsVarSymbol(SymbolType symbol_type) {
-	return symbol_type == IntVarSym || symbol_type == CharVarSym;
+	return symbol_type == SymbolType::IntVarSym || symbol_type == SymbolType::CharVarSym;
 }
 
 bool symbol_table::IsArrSymbol(SymbolType symbol_type) {
-	return symbol_type == IntArrSym || symbol_type == CharArrSym;
+	return symbol_type == SymbolType::IntArrSym || symbol_type == SymbolType::CharArrSym;
 }
 
 bool symbol_table::IsFuncSymbol(SymbolType symbol_type) {
-	return symbol_type == VoidFuncSym || symbol_type == CharFuncSym || symbol_type == IntFuncSym;
+	return symbol_type == SymbolType::VoidFuncSym || symbol_type == SymbolType::CharFuncSym || 
+		symbol_type == SymbolType::IntFuncSym;
 }
 
 bool symbol_table::IsWithRetFunc(string func_name) {
 	transform(func_name.begin(), func_name.end(), func_name.begin(), ::tolower);
-	return symbol_table::GetSymbolLatestType(func_name) == IntFuncSym ||
-		symbol_table::GetSymbolLatestType(func_name) == CharFuncSym;
+	return symbol_table::GetSymbolLatestType(func_name) == SymbolType::IntFuncSym ||
+		symbol_table::GetSymbolLatestType(func_name) == SymbolType::CharFuncSym;
 }
 
 int symbol_table::GetSymbolLatestLevel(string symbol_name) {
@@ -168,7 +165,7 @@ int symbol_table::GetSymbolLatestLevel(string symbol_name) {
 	}
 	shared_ptr<vector<int>> index_vector_ptr = name2index_map.at(symbol_name);
 	if (index_vector_ptr->empty()) {
-		return OtherTypeSym;
+		return SymbolType::OtherTypeSym;
 	}
 	return symbol_ptr_vector.at(index_vector_ptr->back())->get_symbol_level();
 }
@@ -188,11 +185,11 @@ shared_ptr<Symbol> symbol_table::GetSymbolLatest(string symbol_name) {
 SymbolType symbol_table::GetSymbolLatestType(string symbol_name) {
 	transform(symbol_name.begin(), symbol_name.end(), symbol_name.begin(), ::tolower);
 	if (name2index_map.find(symbol_name) == name2index_map.end()) {
-		return OtherTypeSym;
+		return SymbolType::OtherTypeSym;
 	}
 	shared_ptr<vector<int>> index_vector_ptr = name2index_map.at(symbol_name);
 	if (index_vector_ptr->empty()) {
-		return OtherTypeSym;
+		return SymbolType::OtherTypeSym;
 	}
 	return symbol_ptr_vector.at(index_vector_ptr->back())->get_symbol_type();
 }
@@ -200,23 +197,23 @@ SymbolType symbol_table::GetSymbolLatestType(string symbol_name) {
 CheckParaRlt symbol_table::CheckPara(string func_name, vector<ExprType> value_para_type_syms) {
 	transform(func_name.begin(), func_name.end(), func_name.begin(), ::tolower);
 	if (!symbol_table::IsFuncSymbol(symbol_table::GetSymbolLatestType(func_name))) {
-		return OtherFault;
+		return CheckParaRlt::OtherFault;
 	}
 	shared_ptr<vector<int>> index_vector_ptr = name2index_map.at(func_name);
 	shared_ptr<FuncSymbol> func_symbol_ptr =
 		dynamic_pointer_cast<FuncSymbol>(symbol_ptr_vector.at(index_vector_ptr->back()));
 	vector<shared_ptr<VarSymbol>> func_symbol_args = func_symbol_ptr->get_func_symbol_args_ptrs();
 	if (func_symbol_args.size() != value_para_type_syms.size()) {
-		return ParaNumNotMatch;
+		return CheckParaRlt::ParaNumNotMatch;
 	}
 	int args_size = func_symbol_args.size();
 	for (int i = 0; i < args_size; i += 1) {
-		if ((func_symbol_args.at(i)->get_symbol_type() == IntVarSym && value_para_type_syms.at(i) != IntExpr) ||
-			(func_symbol_args.at(i)->get_symbol_type() == CharVarSym && value_para_type_syms.at(i) != CharExpr)) {
-			return ParaTypeNotMatch;
+		if ((func_symbol_args.at(i)->get_symbol_type() == SymbolType::IntVarSym && value_para_type_syms.at(i) != ExprType::IntExpr) ||
+			(func_symbol_args.at(i)->get_symbol_type() == SymbolType::CharVarSym && value_para_type_syms.at(i) != ExprType::CharExpr)) {
+			return CheckParaRlt::ParaTypeNotMatch;
 		}
 	}
-	return NoFault;
+	return CheckParaRlt::NoFault;
 }
 
 shared_ptr<Symbol> symbol_table::GetSymbolPtrVectorBack() {

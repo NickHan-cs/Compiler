@@ -250,4 +250,6 @@ namespace ir {
 	void OutputQuatVector();
 
 	void IrOptim();
+
+	void DelDeadCode();
 }

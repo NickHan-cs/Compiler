@@ -451,50 +451,43 @@ void grammar::const_def() {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		string const_name = token.get_token_str();
-
 		if (token.get_token_sym() != IDENFR) {
 			// int后没有标识符
 			// error();
 		}
 		else {
-			if (!symbol_table::AddVarSymbol(const_name, IntConSym, subprogram_level_stack.top())) {
+			if (!symbol_table::AddVarSymbol(const_name, SymbolType::IntConSym, subprogram_level_stack.top())) {
 				error::OutputError(token.get_line(), NameRedefine);
 			}
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 		}
-
 		ExpectedOrError(ASSIGN);
-
 		int const_value = grammar::integer();
 		shared_ptr<Symbol> symbol_ptr = symbol_table::GetSymbolLatest(const_name);
-		if (symbol_ptr->get_symbol_type() == IntConSym) {
+		if (symbol_ptr->get_symbol_type() == SymbolType::IntConSym) {
 			shared_ptr<VarSymbol> const_symbol_ptr = dynamic_pointer_cast<VarSymbol>(symbol_ptr);
 			const_symbol_ptr->set_var_symbol_value(const_value);
 		}
-
 		while (token.get_token_sym() == COMMA) {
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 			const_name = token.get_token_str();
-			
 			if (token.get_token_sym() != IDENFR) {
 				// ,后面没有标识符
 				// error();
 			}
 			else {
-				if (!symbol_table::AddVarSymbol(const_name, IntConSym, subprogram_level_stack.top())) {
-					error::OutputError(token.get_line(), NameRedefine);
+				if (!symbol_table::AddVarSymbol(const_name, SymbolType::IntConSym, subprogram_level_stack.top())) {
+					error::OutputError(token.get_line(), ErrorType::NameRedefine);
 				}
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
 			}
-			
 			ExpectedOrError(ASSIGN);
-			
 			const_value = grammar::integer();
 			shared_ptr<Symbol> symbol_ptr = symbol_table::GetSymbolLatest(const_name);
-			if (symbol_ptr->get_symbol_type() == IntConSym) {
+			if (symbol_ptr->get_symbol_type() == SymbolType::IntConSym) {
 				shared_ptr<VarSymbol> const_symbol_ptr = dynamic_pointer_cast<VarSymbol>(symbol_ptr);
 				const_symbol_ptr->set_var_symbol_value(const_value);
 			}
@@ -504,21 +497,18 @@ void grammar::const_def() {
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		string const_name = token.get_token_str();
-		
 		if (token.get_token_sym() != IDENFR) {
 			// ,后面没有标识符
 			// error();
 		}
 		else {
-			if (!symbol_table::AddVarSymbol(const_name, CharConSym, subprogram_level_stack.top())) {
+			if (!symbol_table::AddVarSymbol(const_name, SymbolType::CharConSym, subprogram_level_stack.top())) {
 				error::OutputError(token.get_line(), NameRedefine);
 			}
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 		}
-		
 		ExpectedOrError(ASSIGN);
-		
 		int const_value = 0;
 		if (token.get_token_sym() != CHARCON) {
 			// error();
@@ -526,11 +516,10 @@ void grammar::const_def() {
 		else {
 			const_value = token.get_token_str()[0];
 			shared_ptr<Symbol> symbol_ptr = symbol_table::GetSymbolLatest(const_name);
-			if (symbol_ptr->get_symbol_type() == CharConSym) {
+			if (symbol_ptr->get_symbol_type() == SymbolType::CharConSym) {
 				shared_ptr<VarSymbol> const_symbol_ptr = dynamic_pointer_cast<VarSymbol>(symbol_ptr);
 				const_symbol_ptr->set_var_symbol_value(const_value);
 			}
-			
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 		}
@@ -538,21 +527,18 @@ void grammar::const_def() {
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 			const_name = token.get_token_str();
-			
 			if (token.get_token_sym() != IDENFR) {
 				// ,后面没有标识符
 				// error();
 			}
 			else {
-				if (!symbol_table::AddVarSymbol(const_name, CharConSym, subprogram_level_stack.top())) {
+				if (!symbol_table::AddVarSymbol(const_name, SymbolType::CharConSym, subprogram_level_stack.top())) {
 					error::OutputError(token.get_line(), NameRedefine);
 				}
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
 			}
-			
 			ExpectedOrError(ASSIGN);
-			
 			const_value = 0;
 			if (token.get_token_sym() != CHARCON) {
 				// error();
@@ -560,7 +546,7 @@ void grammar::const_def() {
 			else {
 				const_value = token.get_token_str()[0];
 				shared_ptr<Symbol> symbol_ptr = symbol_table::GetSymbolLatest(const_name);
-				if (symbol_ptr->get_symbol_type() == CharConSym) {
+				if (symbol_ptr->get_symbol_type() == SymbolType::CharConSym) {
 					shared_ptr<VarSymbol> const_symbol_ptr = dynamic_pointer_cast<VarSymbol>(symbol_ptr);
 					const_symbol_ptr->set_var_symbol_value(const_value);
 				}
@@ -609,11 +595,11 @@ void grammar::var_def_no_init_while(int symbol_type_sym) {
 		else {
 			string symbol_name = token.get_token_str();
 			int symbol_line = token.get_line();
-			SymbolType symbol_type = symbol_type_sym == CHARTK ? CharVarSym : IntVarSym;
+			SymbolType symbol_type = symbol_type_sym == CHARTK ? SymbolType::CharVarSym : SymbolType::IntVarSym;
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
 			if (token.get_token_sym() == LBRACK) {
-				symbol_type = symbol_type_sym == CHARTK ? CharArrSym : IntArrSym;
+				symbol_type = symbol_type_sym == CHARTK ? SymbolType::CharArrSym : SymbolType::IntArrSym;
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
 				int arr_symbol_dim_1 = grammar::unsigned_integer();
@@ -632,7 +618,7 @@ void grammar::var_def_no_init_while(int symbol_type_sym) {
 					ExpectedOrError(RBRACK);
 				}
 				if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, arr_symbol_dim_2)) {
-					error::OutputError(symbol_line, NameRedefine);
+					error::OutputError(symbol_line, ErrorType::NameRedefine);
 				}
 				Operand* dim_1_operand_ptr = new ImmeOperand(arr_symbol_dim_1);
 				if (arr_symbol_dim_2 == -1) {
@@ -646,9 +632,9 @@ void grammar::var_def_no_init_while(int symbol_type_sym) {
 			else {
 				if (!symbol_table::AddVarSymbol(symbol_name, symbol_type, subprogram_level_stack.top())) {
 					// 已经读到标识符的下一个token，所以last_token才是标识符
-					error::OutputError(last_token.get_line(), NameRedefine);
+					error::OutputError(last_token.get_line(), ErrorType::NameRedefine);
 				}
-				ir::AddQuaternionBack(Quaternion(VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name))));
+				ir::AddQuaternionBack(Quaternion(OperatorType::VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name))));
 			}
 		}
 	}
@@ -673,7 +659,6 @@ void grammar::var_def_no_init() {
 		int symbol_type_sym = token.get_token_sym();
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
-
 		if (token.get_token_sym() != IDENFR) {
 			// int 或 char没有标识符，应该跳读至,或;
 			// error();
@@ -684,37 +669,31 @@ void grammar::var_def_no_init() {
 			int symbol_line = token.get_line();
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
-
 			if (token.get_token_sym() == COMMA) {
 				// <类型标识符> <标识符>,
 				// 读到','说明一个变量定义无初始化结束了，应该加入到符号表中
-				SymbolType symbol_type = symbol_type_sym == CHARTK ? CharVarSym : IntVarSym;
+				SymbolType symbol_type = symbol_type_sym == CHARTK ? SymbolType::CharVarSym : SymbolType::IntVarSym;
 				if (!symbol_table::AddVarSymbol(symbol_name, symbol_type, subprogram_level_stack.top())) {
-					error::OutputError(symbol_line, NameRedefine);
+					error::OutputError(symbol_line, ErrorType::NameRedefine);
 				}
-				ir::AddQuaternionBack(Quaternion(VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name))));
-				
+				ir::AddQuaternionBack(Quaternion(OperatorType::VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name))));
 				grammar::var_def_no_init_while(symbol_type_sym);
 			}
 			else if (token.get_token_sym() == LBRACK) {	
 				//<类型标识符> <标识符>[
-				SymbolType symbol_type = symbol_type_sym == CHARTK ? CharArrSym : IntArrSym;
+				SymbolType symbol_type = symbol_type_sym == CHARTK ? SymbolType::CharArrSym : SymbolType::IntArrSym;
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
-
 				int arr_symbol_dim_1 = grammar::unsigned_integer();
-
 				ExpectedOrError(RBRACK);	
-
 				// <类型标识符> <标识符>[<无符号整数>]
 				if (token.get_token_sym() == COMMA) {	
 					// <类型标识符> <标识符>[<无符号整数>],
 					if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, -1)) {
-						error::OutputError(symbol_line, NameRedefine);
+						error::OutputError(symbol_line, ErrorType::NameRedefine);
 					}
 					Operand* dim_1_operand_ptr = new ImmeOperand(arr_symbol_dim_1);
 					ir::AddQuaternionBack(Quaternion(OperatorType::ARR_VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name)), dim_1_operand_ptr));
-					
 					grammar::var_def_no_init_while(symbol_type_sym);
 				}
 				else if (token.get_token_sym() == LBRACK) {	
@@ -722,17 +701,14 @@ void grammar::var_def_no_init() {
 					grammar::OutputToken(token);
 					token = grammar::GetToken();
 					int arr_symbol_dim_2 = grammar::unsigned_integer();
-
 					ExpectedOrError(RBRACK);
-
 					// <类型标识符> <标识符>[<无符号整数>][<无符号整数>]
 					if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, arr_symbol_dim_2)) {
-						error::OutputError(symbol_line, NameRedefine);
+						error::OutputError(symbol_line, ErrorType::NameRedefine);
 					}
 					Operand* dim_1_operand_ptr = new ImmeOperand(arr_symbol_dim_1);
 					Operand* dim_2_operand_ptr = new ImmeOperand(arr_symbol_dim_2);
 					ir::AddQuaternionBack(Quaternion(OperatorType::ARR_VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name)), dim_1_operand_ptr, dim_2_operand_ptr));
-					
 					if (token.get_token_sym() == COMMA) {	
 						// <类型标识符> <标识符>[<无符号整数>][<无符号整数>],
 						grammar::var_def_no_init_while(symbol_type_sym);
@@ -741,7 +717,7 @@ void grammar::var_def_no_init() {
 				else {
 					// <类型标识符> <标识符>[<无符号整数>];
 					if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, -1)) {
-						error::OutputError(symbol_line, NameRedefine);
+						error::OutputError(symbol_line, ErrorType::NameRedefine);
 					}
 					Operand* dim_1_operand_ptr = new ImmeOperand(arr_symbol_dim_1);
 					ir::AddQuaternionBack(Quaternion(OperatorType::ARR_VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name)), dim_1_operand_ptr));
@@ -749,11 +725,11 @@ void grammar::var_def_no_init() {
 			}
 			else {
 				// <类型标识符> <标识符>;
-				SymbolType symbol_type = symbol_type_sym == CHARTK ? CharVarSym : IntVarSym;
+				SymbolType symbol_type = symbol_type_sym == CHARTK ? SymbolType::CharVarSym : SymbolType::IntVarSym;
 				if (!symbol_table::AddVarSymbol(symbol_name, symbol_type, subprogram_level_stack.top())) {
-					error::OutputError(symbol_line, NameRedefine);
+					error::OutputError(symbol_line, ErrorType::NameRedefine);
 				}
-				ir::AddQuaternionBack(Quaternion(VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name))));
+				ir::AddQuaternionBack(Quaternion(OperatorType::VAR, ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name))));
 			}
 		}
 	}
@@ -772,7 +748,7 @@ void grammar::var_def_with_init() {
 	else {	
 		// <类型标识符>
 		int symbol_type_sym = token.get_token_sym();
-		ExprType expr_type = symbol_type_sym == CHARTK ? CharExpr : IntExpr;
+		ExprType expr_type = symbol_type_sym == CHARTK ? ExprType::CharExpr : ExprType::IntExpr;
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		if (token.get_token_sym() != IDENFR) {
@@ -787,9 +763,9 @@ void grammar::var_def_with_init() {
 			if (token.get_token_sym() == ASSIGN) {	
 				// <类型标识符> <标识符>=
 				// 即使在'='后面出现了问题，该变量还是被加入了符号表
-				SymbolType symbol_type = symbol_type_sym == CHARTK ? CharVarSym : IntVarSym;
+				SymbolType symbol_type = symbol_type_sym == CHARTK ? SymbolType::CharVarSym : SymbolType::IntVarSym;
 				if (!symbol_table::AddVarSymbol(symbol_name, symbol_type, subprogram_level_stack.top())) {
-					error::OutputError(symbol_line, NameRedefine);
+					error::OutputError(symbol_line, ErrorType::NameRedefine);
 				}
 				Operand* symbol_operand_ptr = ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name));
 				ir::AddQuaternionBack(Quaternion(OperatorType::VAR, symbol_operand_ptr));
@@ -801,7 +777,7 @@ void grammar::var_def_with_init() {
 			}
 			else if (token.get_token_sym() == LBRACK) {	
 				// <类型标识符> <标识符>'['
-				SymbolType symbol_type = symbol_type_sym == CHARTK ? CharArrSym : IntArrSym;
+				SymbolType symbol_type = symbol_type_sym == CHARTK ? SymbolType::CharArrSym : SymbolType::IntArrSym;
 				grammar::OutputToken(token);
 				token = grammar::GetToken();
 				int arr_symbol_dim_1 = grammar::unsigned_integer();
@@ -848,7 +824,7 @@ void grammar::var_def_with_init() {
 					// 此处也可能有报错先后问题
 					ExpectedOrError(RBRACK);	// <类型标识符> <标识符>'['<无符号整数>']''['<无符号整数>']'
 					if (!symbol_table::AddArrSymbol(symbol_name, symbol_type, subprogram_level_stack.top(), arr_symbol_dim_1, arr_symbol_dim_2)) {
-						error::OutputError(symbol_line, NameRedefine);
+						error::OutputError(symbol_line, ErrorType::NameRedefine);
 					}
 					Operand* symbol_operand_ptr = ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(symbol_name));
 					ir::AddQuaternionBack(Quaternion(OperatorType::ARR_VAR, symbol_operand_ptr, dim_1_operand_ptr, dim_2_operand_ptr));
@@ -990,7 +966,7 @@ void grammar::loop_statement() {
 		ExpectedOrError(LPARENT);
 		Operand* entry_label = new LabelOperand(ProdLabelName());
 		// ENTRY_LABEL:
-		ir::AddQuaternionBack(Quaternion(LABEL, entry_label));
+		ir::AddQuaternionBack(Quaternion(OperatorType::LABEL, entry_label));
 		Operand *loperand_ptr = nullptr, *roperand_ptr = nullptr;
 		// 得到条件语句的关系运算符和左右操作符
 		OperatorType condition_operator = grammar::condition(loperand_ptr, roperand_ptr);
@@ -1001,9 +977,9 @@ void grammar::loop_statement() {
 		// <语句>
 		grammar::statement();
 		// GOTO ENTRY_LABEL
-		ir::AddQuaternionBack(Quaternion(GOTO, entry_label));
+		ir::AddQuaternionBack(Quaternion(OperatorType::GOTO, entry_label));
 		// EXIT_LABEL:
-		ir::AddQuaternionBack(Quaternion(LABEL, exit_label));
+		ir::AddQuaternionBack(Quaternion(OperatorType::LABEL, exit_label));
 	}
 	else if (token.get_token_sym() == FORTK) {
 		grammar::OutputToken(token);
@@ -1017,10 +993,10 @@ void grammar::loop_statement() {
 			symbol_name = token.get_token_str();
 			int symbol_line = token.get_line();
 			if (!symbol_table::IsNameDefined(symbol_name)) {
-				error::OutputError(symbol_line, NameNotDefine);
+				error::OutputError(symbol_line, ErrorType::NameNotDefine);
 			}
 			if (symbol_table::IsConSymbol(symbol_table::GetSymbolLatestType(symbol_name))) {
-				error::OutputError(symbol_line, ModifyConst);
+				error::OutputError(symbol_line, ErrorType::ModifyConst);
 			}
 			grammar::OutputToken(token);
 			token = grammar::GetToken();
@@ -1030,11 +1006,11 @@ void grammar::loop_statement() {
 		Operand* expr_operand_ptr = nullptr;
 		grammar::expr(expr_operand_ptr);
 		// 可以进行优化，直接将expr中最后一个四元式dest_ptr换成symbol_operand_ptr，就可以不move了
-		ir::AddQuaternionBack(Quaternion(MV, symbol_operand_ptr, expr_operand_ptr));
+		ir::AddQuaternionBack(Quaternion(OperatorType::MV, symbol_operand_ptr, expr_operand_ptr));
 		ExpectedOrError(SEMICN);
 		// ENTRY_LABEL:
 		Operand* entry_label = new LabelOperand(ProdLabelName());
-		ir::AddQuaternionBack(Quaternion(LABEL, entry_label));
+		ir::AddQuaternionBack(Quaternion(OperatorType::LABEL, entry_label));
 		Operand *loperand_ptr = nullptr, *roperand_ptr = nullptr;
 		// 得到条件语句的关系运算符和左右操作符
 		OperatorType condition_operator = grammar::condition(loperand_ptr, roperand_ptr);
@@ -1042,7 +1018,6 @@ void grammar::loop_statement() {
 		// BNE EXIT_LABEL, $t0, $t1
 		Operand* exit_label = new LabelOperand(ProdLabelName());
 		ir::AddQuaternionBack(Quaternion(condition_operator, exit_label, loperand_ptr, roperand_ptr));
-		
 		string step_dest_operand_name = "";
 		Operand* step_dest_operand_ptr = nullptr;
 		if (token.get_token_sym() != IDENFR) {
@@ -1052,10 +1027,10 @@ void grammar::loop_statement() {
 			step_dest_operand_name = token.get_token_str();
 			int symbol_line = token.get_line();
 			if (!symbol_table::IsNameDefined(step_dest_operand_name)) {
-				error::OutputError(symbol_line, NameNotDefine);
+				error::OutputError(symbol_line, ErrorType::NameNotDefine);
 			}
 			if (symbol_table::IsConSymbol(symbol_table::GetSymbolLatestType(step_dest_operand_name))) {
-				error::OutputError(symbol_line, ModifyConst);
+				error::OutputError(symbol_line, ErrorType::ModifyConst);
 			}
 			step_dest_operand_ptr = ir::GetSymbolOperandPtr(symbol_table::GetSymbolLatest(step_dest_operand_name));
 			grammar::OutputToken(token);
@@ -1100,9 +1075,9 @@ void grammar::loop_statement() {
 		// 步长操作
 		ir::AddQuaternionBack(step_quat);
 		// GOTO ENTRY_LABEL
-		ir::AddQuaternionBack(Quaternion(GOTO, entry_label));
+		ir::AddQuaternionBack(Quaternion(OperatorType::GOTO, entry_label));
 		// EXIT_LABEL:
-		ir::AddQuaternionBack(Quaternion(LABEL, exit_label));
+		ir::AddQuaternionBack(Quaternion(OperatorType::LABEL, exit_label));
 	}
 	else {
 		// 这种情况应该不会发生，因为是经过预读进入<循环语句>的
@@ -1130,15 +1105,15 @@ void grammar::condition_statement() {
 	grammar::statement();
 	if (token.get_token_sym() == ELSETK) {
 		Operand *exit_label = new LabelOperand(ProdLabelName());
-		ir::AddQuaternionBack(Quaternion(GOTO, exit_label));
-		ir::AddQuaternionBack(Quaternion(LABEL, false_label));
+		ir::AddQuaternionBack(Quaternion(OperatorType::GOTO, exit_label));
+		ir::AddQuaternionBack(Quaternion(OperatorType::LABEL, false_label));
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		grammar::statement();
-		ir::AddQuaternionBack(Quaternion(LABEL, exit_label));
+		ir::AddQuaternionBack(Quaternion(OperatorType::LABEL, exit_label));
 	}
 	else {
-		ir::AddQuaternionBack(Quaternion(LABEL, false_label));
+		ir::AddQuaternionBack(Quaternion(OperatorType::LABEL, false_label));
 	}
 	grammar::OutputGrammarElementName("<条件语句>");
 }
@@ -1146,11 +1121,11 @@ void grammar::condition_statement() {
 // <条件>::=<表达式><关系运算符><表达式>
 OperatorType grammar::condition(Operand *&loperand_ptr, Operand*& roperand_ptr) {
 	int expr_line = token.get_line();
-	if (grammar::expr(loperand_ptr) != IntExpr) {
-		error::OutputError(expr_line, ConditionJudgeInvalidType);
+	if (grammar::expr(loperand_ptr) != ExprType::IntExpr) {
+		error::OutputError(expr_line, ErrorType::ConditionJudgeInvalidType);
 	}
 	int relation_operator = token.get_token_sym();
-	OperatorType operator_type = UNKNOWN_OPERATOR_TYPE;
+	OperatorType operator_type = OperatorType::UNKNOWN_OPERATOR_TYPE;
 	if (relation_operator != LSS && relation_operator != LEQ &&
 		relation_operator != GRE && relation_operator != GEQ &&
 		relation_operator != EQL && relation_operator != NEQ) {
@@ -1161,8 +1136,8 @@ OperatorType grammar::condition(Operand *&loperand_ptr, Operand*& roperand_ptr) 
 		grammar::OutputToken(token);
 		token = grammar::GetToken();
 		expr_line = token.get_line();
-		if (grammar::expr(roperand_ptr) != IntExpr) {
-			error::OutputError(expr_line, ConditionJudgeInvalidType);
+		if (grammar::expr(roperand_ptr) != ExprType::IntExpr) {
+			error::OutputError(expr_line, ErrorType::ConditionJudgeInvalidType);
 		}
 		switch (relation_operator) {
 		case LSS:
@@ -1465,7 +1440,7 @@ void grammar::case_statement() {
 	grammar::case_tlb(expr_type, expr_operand_ptr, next_label_operand_ptr, exit_label_operand_ptr);
 	grammar::default_statement(next_label_operand_ptr);
 	ExpectedOrError(RBRACE);
-	ir::AddQuaternionBack(Quaternion(LABEL, exit_label_operand_ptr));
+	ir::AddQuaternionBack(Quaternion(OperatorType::LABEL, exit_label_operand_ptr));
 	grammar::OutputGrammarElementName("<情况语句>");
 }
 
@@ -1644,7 +1619,7 @@ ExprType grammar::factor(Operand *&operand_ptr) {
 		*/
 		string func_name = token.get_token_str();
 		if (symbol_table::IsNameDefined(func_name) &&
-			symbol_table::GetSymbolLatestType(func_name) == CharFuncSym) {
+			symbol_table::GetSymbolLatestType(func_name) == SymbolType::CharFuncSym) {
 			factor_type = CharExpr;
 		}
 		grammar::func_call_with_ret();

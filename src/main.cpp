@@ -44,9 +44,9 @@ int main() {
 	}
 	token = lexer::GetNewToken();
 	grammar::program();
-	shared_ptr<vector<Quaternion>> ir_vector_ptr = ir::GetQuatVectorPtr();
 	ir::IrOptim();
 	ir::OutputQuatVector();
+	shared_ptr<vector<Quaternion>> ir_vector_ptr = ir::GetQuatVectorPtr();
 	mips::Translate(ir_vector_ptr);
 	mips::OutputMipsCodeVec();
 }

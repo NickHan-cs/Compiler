@@ -7,6 +7,7 @@
 #include <cassert>
 #include "ir.h"
 #include "symbol.h"
+#include "basic_block.h"
 
 using namespace std;
 
@@ -87,6 +88,23 @@ void ir::OutputQuatVector() {
 
 void ir::IrOptim() {
 	if (IR_OPTIMIZE) {
-		
+		ir::DelDeadCode();
+	}
+}
+
+void ir::DelDeadCode() {
+	while (true) {
+		vector<BasicBlock*> basic_block_ptrs = DivideBasicBlocks(quat_vector_ptr);
+		set<int> dead_code_idxs = GetDeadCodes(quat_vector_ptr, basic_block_ptrs);
+		if (dead_code_idxs.empty()) {
+			break;
+		}
+		shared_ptr<vector<Quaternion>> new_quat_vector_ptr = make_shared<vector<Quaternion>>();
+		for (int i = 0; i < quat_vector_ptr->size(); i++) {
+			if (dead_code_idxs.find(i) == dead_code_idxs.end()) {
+				new_quat_vector_ptr->push_back((*quat_vector_ptr)[i]);
+			}
+		}
+		quat_vector_ptr = make_shared<vector<Quaternion>>(*new_quat_vector_ptr);
 	}
 }

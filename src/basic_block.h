@@ -30,10 +30,13 @@ public:
 std::vector<BasicBlock*> DivideBasicBlocks(std::shared_ptr<std::vector<Quaternion>> ir_vector_ptr);
 
 // 生成流图
-void GenFlowGraph(std::shared_ptr<std::vector<Quaternion>> const ir_vector_ptr, const std::vector<BasicBlock*> basic_block_ptrs);
+void GenFlowGraph(const std::shared_ptr<std::vector<Quaternion>> ir_vector_ptr, const std::vector<BasicBlock*> basic_block_ptrs);
 
 // 计算每个基本块的use集合和def集合
-void GenUseDefSet(std::shared_ptr<std::vector<Quaternion>> const ir_vector_ptr, const std::vector<BasicBlock*> basic_block_ptrs);
+void GenUseDefSet(const std::shared_ptr<std::vector<Quaternion>> ir_vector_ptr, const std::vector<BasicBlock*> basic_block_ptrs);
 
 // 活跃变量分析
-void LiveVariableAnalysis(std::shared_ptr<std::vector<Quaternion>> const ir_vector_ptr, const std::vector<BasicBlock*> basic_block_ptrs);
+void LiveVariableAnalysis(const std::shared_ptr<std::vector<Quaternion>> ir_vector_ptr, const std::vector<BasicBlock*> basic_block_ptrs);
+
+// 获取死代码的索引集合
+std::set<int> GetDeadCodes(const std::shared_ptr<std::vector<Quaternion>> ir_vector_ptr, const std::vector<BasicBlock*> basic_block_ptrs);
